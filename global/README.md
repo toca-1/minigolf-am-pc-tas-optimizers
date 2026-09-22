@@ -69,7 +69,7 @@ Booting directly with `dynamic_x86` did not reliably reproduce the same machine 
 4. use an otherwise unused input (Player 2 Joystick Button 2) as an out-of-band request to switch the running CPU core to `dynamic_x86`
 5. run the candidate using the faster dynamic core
 
-# Building
+# Building & Setup
 
 ## 0. Set up Ubuntu 26.04
 
@@ -222,7 +222,30 @@ Package the core:
   -r ~/src/chimera
 ```
 
+and move it to where the optimizer expects it
+
+```
+mkdir -p ~/minigolf-headless/core
+
+cp ~/src/chimera/build/Cores/dosbox-x.chimeraCore \
+   ~/minigolf-headless/core/dosbox-x-hybrid-search.chimeraCore
+```
+
+## 4. Copy install.hdd
+
+If your install.hdd is located at, say, `C:\PATH\install.hdd`, then copy the "PATH" part and replace it in the following command:
+```
+cp "/mnt/c/PATH/install.hdd" ~/install.hdd
+```
+Then check it with `sha1sum ~/install.hdd`; the correct SHA1 is b63a81c7ef613fb42e725e625ebe0eae18e91119
+
+## 5. Make the launcher executable
+
+...
+
 # Running an exhaustive search
+
+
 
 A search needs:
 

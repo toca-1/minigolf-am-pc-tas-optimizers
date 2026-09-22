@@ -275,7 +275,7 @@ python3 monitor_global_search.py currentHoleNumber initialX initialY frames_uppe
 ```
 e.g., 
 ```
-./run_global_search.sh 10 1000 486 75
+./run_global_search.sh 10 1997 1000 486 75
 python3 monitor_global_search.py 10 1000 486 75
 ```
 to brute-force hole 10 if it starts on frame 1000 with initial mouse coordinates X=486, Y=75. One other thing to note about the search is that workers share a memory-mapped incumbent file, so when one worker finds a faster result, the other workers can immediately adopt the lower frame cutoff.

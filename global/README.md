@@ -203,7 +203,7 @@ Configure the Waterbox guest build:
 
 ```
 ./waterbox/setup-guest.sh \
-  -m /path/to/chimera-common-minibox
+  -m ~/src/chimera/chimera-common-minibox
 ```
 
 Build:

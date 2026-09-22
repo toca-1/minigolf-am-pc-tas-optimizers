@@ -131,7 +131,7 @@ git submodule update --init --recursive
 Apply the scanner patch:
 
 ```
-git apply /path/to/global/patches/chimera-global-scanner.patch
+git apply ~/src/minigolf-am-pc-tas-optimizers/global/patches/chimera-global-scanner.patch
 ```
 
 Build `chimera-run` and the runtime libraries it needs:

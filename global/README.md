@@ -2,6 +2,8 @@
 
 This directory contains the exhaustive shot optimizer used for my *Minigolf am PC* TAS. Unlike the [local optimizer](https://github.com/toca-1/minigolf-am-pc-tas-optimizers/tree/main/local), this one does an exhaustive search for **one** shot (i.e., it does **not** exhaust all arbitrary sequences of mouse inputs that could theoretically be entered).
 
+For a detailed explanation of the input model and the development of both optimizers, see the corresponding toolassisted.run forum post [here](https://forum.toolassisted.run/t/minigolf-am-pc-pc-minigolf-am-pc/1540/2)
+
 ## Directory layout
 
 ```text

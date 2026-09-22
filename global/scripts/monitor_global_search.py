@@ -16,17 +16,23 @@ TOKEN = b"[minigolf] CPU core -> dynamic_x86"
 INTERVAL = 10.0
 RATE_WINDOW = 60.0
 
+
 def bounded_int(name: str, minimum: int, maximum: int):
 	def parse(value: str) -> int:
 		try:
 			n = int(value)
 		except ValueError as exc:
-			raise argparse.ArgumentTypeError(f"{name} must be an integer") from exc
+			raise argparse.ArgumentTypeError(
+				f"{name} must be an integer"
+			) from exc
+
 		if not minimum <= n <= maximum:
 			raise argparse.ArgumentTypeError(
 				f"{name} must be {minimum}..{maximum}"
 			)
+
 		return n
+
 	return parse
 
 
@@ -38,27 +44,18 @@ parser.add_argument(
 	type=bounded_int("currentHoleNumber", 1, 18),
 )
 parser.add_argument(
-	"initialX",
-	type=bounded_int("initialX", 0, 2560),
-)
-parser.add_argument(
-	"initialY",
-	type=bounded_int("initialY", 0, 2048),
-)
-parser.add_argument(
 	"frames_upperlimit",
 	type=bounded_int("frames_upperlimit", 1, 2_147_483_647),
 )
 args = parser.parse_args()
 
 hole = args.currentHoleNumber
-initial_x = args.initialX
-initial_y = args.initialY
 upper_limit = args.frames_upperlimit
 
 out_root = Path(
 	os.environ.get("MINIGOLF_OUT_ROOT", str(Path.home()))
 ).expanduser()
+
 root = out_root / f"minigolf-hole{hole}-exhaustive"
 shared_path = root / "shared-best.bin"
 config_path = root / "run-config.json"
@@ -66,6 +63,7 @@ finished_path = root / "run-finished.json"
 
 total = DEFAULT_TOTAL
 candidate_count = 0
+
 improvement_events: list[str] = []
 shared_by_score: dict[int, str] = {}
 completed: dict[int, str] = {}
@@ -131,6 +129,7 @@ def scan_full_log(path: Path) -> None:
 	candidate_count += data.count(TOKEN)
 
 	pieces = data.split(b"\n")
+
 	for raw in pieces[:-1]:
 		consume_physical_line(raw)
 
@@ -198,12 +197,17 @@ def read_new_data() -> None:
 
 		old_tail = state["token_tail"]
 		assert isinstance(old_tail, bytes)
+
 		combined_token_data = old_tail + new
 		candidate_count += combined_token_data.count(TOKEN)
-		state["token_tail"] = combined_token_data[-(len(TOKEN) - 1):]
+
+		state["token_tail"] = combined_token_data[
+			-(len(TOKEN) - 1):
+		]
 
 		old_carry = state["physical_carry"]
 		assert isinstance(old_carry, bytes)
+
 		physical = old_carry + new
 		pieces = physical.split(b"\n")
 
@@ -216,10 +220,13 @@ def read_new_data() -> None:
 def shared_best() -> int:
 	try:
 		raw = shared_path.read_bytes()[:4]
+
 		if len(raw) == 4:
 			return struct.unpack("<i", raw)[0]
+
 	except OSError:
 		pass
+
 	return upper_limit
 
 
@@ -229,6 +236,7 @@ def incumbent_history() -> list[str]:
 		key=lambda item: item[0],
 		reverse=True,
 	)
+
 	return [line for _, line in rows]
 
 
@@ -238,11 +246,14 @@ def current_best_hits(best: int) -> list[str]:
 	for line in improvement_events:
 		if not line.startswith(("NEW_BEST ", "TIE_BEST ")):
 			continue
+
 		if parse_score(line) != best:
 			continue
+
 		rows.append((parse_plan(line), line))
 
 	rows.sort(key=lambda item: item[0])
+
 	return [line for _, line in rows]
 
 
@@ -256,11 +267,13 @@ def read_config() -> dict | None:
 def config_matches(config: dict) -> bool:
 	expected = {
 		"currentHoleNumber": hole,
-		"initialX": initial_x,
-		"initialY": initial_y,
 		"frames_upperlimit": upper_limit,
 	}
-	return all(config.get(key) == value for key, value in expected.items())
+
+	return all(
+		config.get(key) == value
+		for key, value in expected.items()
+	)
 
 
 def finished_info() -> dict | None:
@@ -278,17 +291,28 @@ def render() -> bool:
 	now = time.monotonic()
 
 	samples.append((now, candidate_count))
+
 	while len(samples) > 2 and now - samples[0][0] > RATE_WINDOW:
 		samples.popleft()
 
 	t0, c0 = samples[0]
 	elapsed = now - t0
-	rate = (candidate_count - c0) / elapsed if elapsed > 0 else 0.0
 
-	pct = 100.0 * candidate_count / total if total > 0 else 0.0
+	rate = (
+		(candidate_count - c0) / elapsed
+		if elapsed > 0
+		else 0.0
+	)
+
+	pct = (
+		100.0 * candidate_count / total
+		if total > 0
+		else 0.0
+	)
 	pct = max(0.0, min(100.0, pct))
 
 	remaining = max(0, total - candidate_count)
+
 	if rate > 0:
 		eta_seconds = int(remaining / rate)
 		hours, rem = divmod(eta_seconds, 3600)
@@ -298,19 +322,30 @@ def render() -> bool:
 		eta = "calculating..."
 
 	width = 75
-	filled = min(width, int(width * pct / 100.0))
+	filled = min(
+		width,
+		int(width * pct / 100.0),
+	)
+
 	bar = "#" * filled + "-" * (width - filled)
 
 	best = shared_best()
 	history = incumbent_history()
-	best_hits = current_best_hits(best) if best < upper_limit else []
+
+	best_hits = (
+		current_best_hits(best)
+		if best < upper_limit
+		else []
+	)
 
 	config = read_config()
+
 	expected_workers = (
 		int(config.get("workers", 0))
 		if config and config_matches(config)
 		else 0
 	)
+
 	detected_workers = len(states)
 
 	clear_screen()
@@ -319,36 +354,67 @@ def render() -> bool:
 		f"Course {hole} exhaustive optimization "
 		f"{time.strftime('%H:%M:%S')}"
 	)
+
 	print(
-		f"cursor {initial_x},{initial_y} | "
 		f"upper limit {upper_limit}f | "
 		f"workers {detected_workers}"
-		+ (f"/{expected_workers}" if expected_workers else "")
+		+ (
+			f"/{expected_workers}"
+			if expected_workers
+			else ""
+		)
 	)
+
 	print()
 
 	if not root.exists():
-		print(f"Waiting for search directory:\n  {root}")
+		print(
+			f"Waiting for search directory:\n"
+			f"  {root}"
+		)
 		return False
 
 	if config and not config_matches(config):
-		print("WARNING: run-config.json does not match these four arguments.")
-		print("Start the monitor with the same arguments as the launcher.")
+		print(
+			"WARNING: run-config.json does not match "
+			"these arguments."
+		)
+		print(
+			"Check currentHoleNumber and "
+			"frames_upperlimit."
+		)
 		print()
 
 	print(f"[{bar}] {pct:6.2f}%")
 	print()
-	print(f"candidate starts : {candidate_count} / {total}")
-	print(f"60s rate         : {rate:.2f} plans/sec")
-	print(f"ETA              : {eta}")
+
+	print(
+		f"candidate starts : "
+		f"{candidate_count} / {total}"
+	)
+	print(
+		f"60s rate         : "
+		f"{rate:.2f} plans/sec"
+	)
+	print(
+		f"ETA              : "
+		f"{eta}"
+	)
 
 	if best < upper_limit:
-		print(f"GLOBAL BEST      : {best} frames <<< IMPROVEMENT")
+		print(
+			f"GLOBAL BEST      : "
+			f"{best} frames <<< IMPROVEMENT"
+		)
 	else:
-		print(f"GLOBAL BEST      : none yet (<{upper_limit}f required)")
+		print(
+			f"GLOBAL BEST      : "
+			f"none yet (<{upper_limit}f required)"
+		)
 
 	print()
 	print("Global incumbent history:")
+
 	if history:
 		for line in history[-12:]:
 			print(line)
@@ -362,11 +428,14 @@ def render() -> bool:
 			f"Current-best classes ({best}f): "
 			f"{len(best_hits)} logged"
 		)
+
 		for line in best_hits[-6:]:
 			print(line)
+
 		print()
 
 	print("Completed workers:")
+
 	if completed:
 		for worker in sorted(completed):
 			print(completed[worker])
@@ -374,6 +443,7 @@ def render() -> bool:
 		print("(none yet)")
 
 	finished = finished_info()
+
 	if finished is not None:
 		print()
 		print(
@@ -381,6 +451,7 @@ def render() -> bool:
 			f"exit={finished.get('exitStatus', '?')} "
 			f"wall={finished.get('wallSeconds', '?')}s"
 		)
+
 		return True
 
 	return False
@@ -391,6 +462,7 @@ if root.exists():
 
 while True:
 	done = render()
+
 	if done:
 		break
 

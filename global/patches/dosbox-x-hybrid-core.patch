@@ -1,0 +1,55 @@
+diff --git a/waterbox/waterbox.cpp b/waterbox/waterbox.cpp
+index 6e99d29..dcba014 100644
+--- a/waterbox/waterbox.cpp
++++ b/waterbox/waterbox.cpp
+@@ -18,10 +18,13 @@
+ #include <emulibc.h>
+ #include <waterbox_settings.h>
+ #include <waterbox_slots.h>
++#include <control.h>
+ 
+ #include "dosbox-driver.h"
+ #include "waterbox-input.h"
+ 
++extern Config *control;
++
+ static char g_loadError[512];
+ 
+ /* ---- drive lights (an optional guest ABI group) ----
+@@ -92,6 +95,7 @@ static constexpr int BTN_MOUSE = 12;      // left middle right (LEVELS)
+ static constexpr int BTN_SWAP = 15;       // prevFD nextFD swapFD prevCD nextCD swapCD
+ static constexpr int BTN_KEYS = 21;       // 102 keyboard keys (KBD 1..102)
+ static constexpr int BTN_KEY_COUNT = 102;
++static constexpr int BTN_SEARCH_DYNAMIC = 11; // P2 Joystick Button 2; joystick 2 disabled in Minigolf
+ static constexpr int BTN_COUNT = 123;
+ static uint8_t g_buttons[BTN_COUNT];      // current levels, set by SetButton
+ static uint8_t g_prevButtons[BTN_COUNT];  // last frame's levels (edges)
+@@ -425,6 +429,28 @@ ECL_EXPORT void FrameAdvance(uint64_t)
+ {
+ 	if (!g_inited) return;
+ 
++	/*
++	 * Minigolf search experiment:
++	 * P2 Joystick Button 2 is an out-of-band request to switch the
++	 * running DOSBox-X CPU from normal to dynamic_x86.  The Minigolf
++	 * project has joystick 2 disabled, so this input never reaches the
++	 * emulated gameport.
++	 *
++	 * Do this before this frame's guest input is processed, so the same
++	 * frame can both switch the CPU core and carry the candidate mouse
++	 * input.
++	 */
++	if (!g_joystick2Enabled
++	    && g_buttons[BTN_SEARCH_DYNAMIC]
++	    && !g_prevButtons[BTN_SEARCH_DYNAMIC]) {
++		Section *sec = control ? control->GetSection("cpu") : nullptr;
++		if (sec != nullptr) {
++			sec->HandleInputline("use dynamic core with paging on=true");
++			sec->HandleInputline("core=dynamic_x86");
++			fprintf(stderr, "[minigolf] CPU core -> dynamic_x86\n");
++		}
++	}
++
+ 	// keyboard block: config index BTN_KEYS+i = KBD value i+1
+ 	for (int i = 0; i < BTN_KEY_COUNT && i + 1 < WBX_KEY_COUNT; i++) {
+ 		if (g_buttons[BTN_KEYS + i] != 0) g_input.keys[i + 1] = 1;

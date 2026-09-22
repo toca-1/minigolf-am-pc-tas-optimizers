@@ -1,0 +1,13 @@
+diff --git a/meson.build b/meson.build
+index 287c8e1..ed3e178 100644
+--- a/meson.build
++++ b/meson.build
+@@ -124,7 +124,7 @@ if [ ! -d $D/src/gcc-$V/libstdc++-v3 ]; then tar xf $D/gcc-$V.tar.xz -C $D/src;
+ # tzdb.cc build fails ("mutex does not name a type").
+ echo '#include "gthr-posix.h"' > $D/gthr-inc/gthr-default.h
+ cd $D/build
+-if [ ! -f Makefile ]; then CC="gcc -specs @2@" CXX="g++ -specs @2@" CFLAGS="@3@ -I$D/gthr-inc" CXXFLAGS="@3@ -I$D/gthr-inc" $D/src/gcc-$V/libstdc++-v3/configure --host=x86_64-linux-musl --build=x86_64-pc-linux-gnu --prefix=@4@ --disable-shared --enable-static --disable-multilib --disable-libstdcxx-pch --disable-nls; fi
++if [ ! -f Makefile ]; then CC="gcc -specs @2@" CXX="g++ -specs @2@" CFLAGS="-std=gnu17 @3@ -I$D/gthr-inc" CXXFLAGS="@3@ -I$D/gthr-inc" $D/src/gcc-$V/libstdc++-v3/configure --host=x86_64-linux-musl --build=x86_64-pc-linux-gnu --prefix=@4@ --disable-shared --enable-static --disable-multilib --disable-libstdcxx-pch --disable-nls; fi
+ make -j"$(nproc)"
+ make install
+ # everything needed now lives in the sysroot; reclaim the ~1.1GB source tree and

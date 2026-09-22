@@ -1,0 +1,1888 @@
+diff --git a/source/engine/tools/chimera-run.cpp b/source/engine/tools/chimera-run.cpp
+index 221a87b..95f473f 100644
+--- a/source/engine/tools/chimera-run.cpp
++++ b/source/engine/tools/chimera-run.cpp
+@@ -1,3 +1,8 @@
++#include "minigolf_scan_impl.h"
++#include <algorithm>
++#include <fcntl.h>
++#include <sys/mman.h>
++#include <unistd.h>
+ /* chimera-run - the engine's headless runner.
+  *
+  * Loads a core package, a rom, and a movie input log; runs the movie; dumps
+@@ -744,6 +749,1136 @@ int main(int argc, char **argv)
+ 		fprintf(stderr, "state file tag: %.*s\n", (int)(tagLen < sizeof tag ? tagLen : sizeof tag), (const char *)tag);
+ 	}
+ 
++/*
++	 * Pure planner / exhaustive-space precompute.
++	 *
++	 * No candidate emulation is performed here.  This enumerates every
++	 * legal Display Input coordinate, generates the exact PS/2 input
++	 * sequence, and deduplicates complete sequences.
++	 */
++	if (std::getenv("MINIGOLF_SCAN_PRECOMPUTE"))
++	{
++		try
++		{
++			return minigolf_scan::run_precompute();
++		}
++		catch (const std::exception &e)
++		{
++			return fail(
++				metaPath,
++				std::string(
++					"Minigolf precompute: ")
++				+ e.what());
++		}
++	}
++
++
++
++
++	/*
++	 * Minigolf exhaustive scanner.
++	 *
++	 * MINIGOLF_SCAN=1 enables it.
++	 *
++	 * Optional:
++	 *   MINIGOLF_SCAN_WORKER=N       0-based worker number
++	 *   MINIGOLF_SCAN_WORKERS=N      total worker count
++	 *   MINIGOLF_SCAN_MAX_FRAMES=N   initial ceiling (default 100)
++	 *   MINIGOLF_SCAN_LIMIT=N        only evaluate N assigned plans
++	 *                                (0/unset = no limit)
++	 *   MINIGOLF_SCAN_PROGRESS=N     progress interval (default 1000)
++	 *   MINIGOLF_SWITCH_DYNAMIC=1    normal -> dynamic_x86 on frame 0
++	 *
++	 * Plans are assigned by:
++	 *
++	 *   unique_plan_index % worker_count == worker
++	 *
++	 * Each worker keeps its own incumbent.  This is completely safe:
++	 * a worker with a worse incumbent merely runs some candidates for
++	 * longer; it cannot miss a candidate that beats the global optimum.
++	 *
++	 * We simulate THROUGH the incumbent frame, rather than stopping at
++	 * incumbent-1, so ties at the eventual optimum are also retained.
++	 */
++	if (std::getenv("MINIGOLF_SCAN"))
++	{
++		if (stateIn.empty())
++			return fail(
++				metaPath,
++				"MINIGOLF_SCAN requires --state");
++
++		auto envI64 =
++			[](const char *name,
++			   int64_t fallback) -> int64_t
++		{
++			const char *text = std::getenv(name);
++
++			if (!text || !text[0])
++				return fallback;
++
++			return std::atoll(text);
++		};
++
++		const int64_t worker =
++			envI64(
++				"MINIGOLF_SCAN_WORKER",
++				0);
++
++		const int64_t workerCount =
++			envI64(
++				"MINIGOLF_SCAN_WORKERS",
++				1);
++
++		const int64_t maxFrames =
++			envI64(
++				"MINIGOLF_SCAN_MAX_FRAMES",
++				100);
++
++		const int64_t scanLimit =
++			envI64(
++				"MINIGOLF_SCAN_LIMIT",
++				0);
++
++		const int64_t progressEvery =
++			envI64(
++				"MINIGOLF_SCAN_PROGRESS",
++				1000);
++
++		const int64_t scanXMin =
++			envI64(
++				"MINIGOLF_SCAN_X_MIN",
++				minigolf_scan::LEGAL_X_MIN);
++
++		const int64_t scanXMax =
++			envI64(
++				"MINIGOLF_SCAN_X_MAX",
++				minigolf_scan::LEGAL_X_MAX);
++
++		const int64_t scanYMin =
++			envI64(
++				"MINIGOLF_SCAN_Y_MIN",
++				minigolf_scan::LEGAL_Y_MIN);
++
++		const int64_t scanYMax =
++			envI64(
++				"MINIGOLF_SCAN_Y_MAX",
++				minigolf_scan::LEGAL_Y_MAX);
++
++
++		const int64_t scanCursorX =
++			envI64(
++				"MINIGOLF_SCAN_CURSOR_X",
++				minigolf_scan::CURSOR_X);
++
++		const int64_t scanCursorY =
++			envI64(
++				"MINIGOLF_SCAN_CURSOR_Y",
++				minigolf_scan::CURSOR_Y);
++
++		const int64_t scanStartAxisX =
++			envI64(
++				"MINIGOLF_SCAN_START_AXIS_X",
++				minigolf_scan::START_AXIS_X);
++
++		const int64_t scanStartAxisY =
++			envI64(
++				"MINIGOLF_SCAN_START_AXIS_Y",
++				minigolf_scan::START_AXIS_Y);
++
++		const int64_t scanStartHole =
++			envI64(
++				"MINIGOLF_SCAN_START_HOLE",
++				2);
++
++		const int64_t scanNextHole =
++			envI64(
++				"MINIGOLF_SCAN_NEXT_HOLE",
++				scanStartHole + 1);
++
++		const char *scanOrderText =
++			std::getenv(
++				"MINIGOLF_SCAN_ORDER");
++
++		const bool bottomUp =
++			scanOrderText
++			&& std::strcmp(
++				scanOrderText,
++				"bottom-up") == 0;
++
++		const char *sharedBestPath =
++			std::getenv(
++				"MINIGOLF_SCAN_SHARED_BEST_FILE");
++
++		if (workerCount <= 0)
++			return fail(
++				metaPath,
++				"MINIGOLF_SCAN_WORKERS must be > 0");
++
++		if (worker < 0 ||
++		    worker >= workerCount)
++			return fail(
++				metaPath,
++				"MINIGOLF_SCAN_WORKER is outside worker range");
++
++		if (maxFrames <= 0 ||
++		    maxFrames > 10000)
++			return fail(
++				metaPath,
++				"MINIGOLF_SCAN_MAX_FRAMES must be 1..10000");
++
++		if (scanLimit < 0)
++			return fail(
++				metaPath,
++				"MINIGOLF_SCAN_LIMIT must be >= 0");
++
++		if (scanXMin < minigolf_scan::LEGAL_X_MIN ||
++		    scanXMax > minigolf_scan::LEGAL_X_MAX ||
++		    scanYMin < minigolf_scan::LEGAL_Y_MIN ||
++		    scanYMax > minigolf_scan::LEGAL_Y_MAX ||
++		    scanXMin > scanXMax ||
++		    scanYMin > scanYMax)
++		{
++			return fail(
++				metaPath,
++				"scan rectangle is outside legal bounds");
++		}
++
++
++		if (scanCursorX < 0 || scanCursorX > 2560 ||
++		    scanCursorY < 0 || scanCursorY > 2048 ||
++		    scanStartAxisX < 0 || scanStartAxisX > 2560 ||
++		    scanStartAxisY < 0 || scanStartAxisY > 2048)
++		{
++			return fail(
++				metaPath,
++				"scan cursor/carrier is outside Display Input bounds");
++		}
++
++		if (scanStartHole < 0 || scanStartHole > 255 ||
++		    scanNextHole < 0 || scanNextHole > 255)
++		{
++			return fail(
++				metaPath,
++				"scan hole byte is outside u8 range");
++		}
++
++const char *switchText =
++			std::getenv(
++				"MINIGOLF_SWITCH_DYNAMIC");
++
++		const bool switchDynamic =
++			switchText
++			&& switchText[0] != '\0'
++			&& std::strcmp(
++				switchText,
++				"0") != 0;
++
++		constexpr int32_t
++			SEARCH_DYNAMIC_BUTTON = 11;
++
++		constexpr int64_t
++			HOLE_ADDRESS = 0x023DB7B8;
++
++		const uint8_t START_HOLE =
++			static_cast<uint8_t>(
++				scanStartHole);
++
++		const uint8_t NEXT_HOLE =
++			static_cast<uint8_t>(
++				scanNextHole);
++
++		/*
++		 * Re-read the exact common branch state.
++		 */
++		std::vector<uint8_t> baseState;
++
++		if (!readWholeFile(
++				stateIn.c_str(),
++				baseState))
++		{
++			return fail(
++				metaPath,
++				"scan: could not reread state");
++		}
++
++		/*
++		 * Locate Physical RAM.
++		 */
++		int32_t ramDomain = -1;
++
++		for (int32_t d = 0;
++		     d < ce_session_domain_count(session);
++		     d++)
++		{
++			const char *name =
++				ce_session_domain_name(
++					session,
++					d);
++
++			if (name
++			    && std::strcmp(
++				    name,
++				    "Physical RAM") == 0)
++			{
++				ramDomain = d;
++				break;
++			}
++		}
++
++		if (ramDomain < 0)
++			return fail(
++				metaPath,
++				"scan: Physical RAM not found");
++
++		const uint64_t ramPtrValue =
++			ce_session_domain_ptr(
++				session,
++				ramDomain);
++
++		if (ramPtrValue == 0)
++			return fail(
++				metaPath,
++				"scan: Physical RAM has no direct pointer");
++
++		const uint8_t *ram =
++			reinterpret_cast<const uint8_t *>(
++				static_cast<uintptr_t>(
++					ramPtrValue));
++
++		/*
++		 * Locate controls by name.
++		 */
++		auto findButton =
++			[&](const char *wanted) -> int32_t
++		{
++			for (int64_t i = 0;
++			     i < ce_session_button_count(session);
++			     i++)
++			{
++				const char *name =
++					ce_session_button_name(
++						session,
++						i);
++
++				if (name
++				    && std::strcmp(
++					    name,
++					    wanted) == 0)
++				{
++					return
++						static_cast<int32_t>(
++							i);
++				}
++			}
++
++			return -1;
++		};
++
++		auto findAxis =
++			[&](const char *wanted) -> int32_t
++		{
++			for (int64_t i = 0;
++			     i < ce_session_axis_count(session);
++			     i++)
++			{
++				const char *name =
++					ce_session_axis_name(
++						session,
++						i);
++
++				if (name
++				    && std::strcmp(
++					    name,
++					    wanted) == 0)
++				{
++					return
++						static_cast<int32_t>(
++							i);
++				}
++			}
++
++			return -1;
++		};
++
++		const int32_t mouseLeft =
++			findButton(
++				"Mouse Left Button");
++
++		const int32_t mouseX =
++			findAxis(
++				"Mouse Position X");
++
++		const int32_t mouseY =
++			findAxis(
++				"Mouse Position Y");
++
++		const int32_t mouseDX =
++			findAxis(
++				"Mouse Speed X");
++
++		const int32_t mouseDY =
++			findAxis(
++				"Mouse Speed Y");
++
++		if (mouseLeft < 0 ||
++		    mouseX < 0 ||
++		    mouseY < 0 ||
++		    mouseDX < 0 ||
++		    mouseDY < 0)
++		{
++			return fail(
++				metaPath,
++				"scan: DOSBox-X mouse controls not found");
++		}
++
++		if (switchDynamic
++		    && ce_session_button_count(session)
++		       <= SEARCH_DYNAMIC_BUTTON)
++		{
++			return fail(
++				metaPath,
++				"scan: dynamic-switch button missing");
++		}
++
++		auto setMouse =
++			[&](const minigolf_scan::MouseFrame &f)
++		{
++			ce_session_set_axis(
++				session,
++				mouseX,
++				f.x);
++
++			ce_session_set_axis(
++				session,
++				mouseY,
++				f.y);
++
++			ce_session_set_axis(
++				session,
++				mouseDX,
++				f.speedX);
++
++			ce_session_set_axis(
++				session,
++				mouseDY,
++				f.speedY);
++
++			ce_session_set_button(
++				session,
++				mouseLeft,
++				f.left);
++		};
++
++		const minigolf_scan::MouseFrame neutral{
++			1280,
++			1024,
++			0,
++			0,
++			0
++		};
++
++		std::fprintf(
++			stderr,
++			"\n=== Minigolf exhaustive scan ===\n"
++			"worker              : %lld / %lld\n"
++			"maximum initial run : %lld frames\n"
++			"execution core      : %s\n"
++			"state bytes         : %zu\n"
++			"enumerating plans...\n",
++			static_cast<long long>(
++				worker),
++			static_cast<long long>(
++				workerCount),
++			static_cast<long long>(
++				maxFrames),
++			switchDynamic
++				? "dynamic_x86 after frame-0 switch"
++				: "normal",
++			baseState.size());
++
++		std::fflush(stderr);
++
++		/*
++		 * This is the same exact full-screen enumeration used by
++		 * MINIGOLF_SCAN_PRECOMPUTE.
++		 */
++
++		minigolf_scan::configure_planner(
++			static_cast<int>(
++				scanCursorX),
++			static_cast<int>(
++				scanCursorY),
++			static_cast<int>(
++				scanStartAxisX),
++			static_cast<int>(
++				scanStartAxisY));
++
++std::vector<minigolf_scan::UniquePlan>
++			plans =
++				minigolf_scan::
++					enumerate_unique_plans_range(
++					static_cast<int>(scanXMin),
++					static_cast<int>(scanXMax),
++					static_cast<int>(scanYMin),
++					static_cast<int>(scanYMax));
++
++
++		if (bottomUp)
++		{
++			std::sort(
++				plans.begin(),
++				plans.end(),
++				[](const minigolf_scan::UniquePlan &a,
++				   const minigolf_scan::UniquePlan &b)
++				{
++					if (a.maxY != b.maxY)
++						return a.maxY > b.maxY;
++
++					return a.minX < b.minX;
++				});
++		}
++
++const size_t totalUnique =
++			plans.size();
++
++
++		std::fprintf(
++			stderr,
++			"cursor              : %lld,%lld\n"
++			"start carrier       : %lld,%lld\n"
++			"hole transition     : %lld -> %lld\n"
++			"search order        : %s\n",
++			static_cast<long long>(
++				scanCursorX),
++			static_cast<long long>(
++				scanCursorY),
++			static_cast<long long>(
++				scanStartAxisX),
++			static_cast<long long>(
++				scanStartAxisY),
++			static_cast<long long>(
++				scanStartHole),
++			static_cast<long long>(
++				scanNextHole),
++			bottomUp
++				? "bottom-up / left-to-right"
++				: "native");
++
++		if (!plans.empty())
++		{
++			std::fprintf(
++				stderr,
++				"first ordered plan  : raw=%d,%d y_bounds=%d..%d\n"
++				"last ordered plan   : raw=%d,%d y_bounds=%d..%d\n",
++				plans.front().canonicalX,
++				plans.front().canonicalY,
++				plans.front().minY,
++				plans.front().maxY,
++				plans.back().canonicalX,
++				plans.back().canonicalY,
++				plans.back().minY,
++				plans.back().maxY);
++		}
++
++size_t assignedTotal = 0;
++
++		if (static_cast<size_t>(worker)
++		    < totalUnique)
++		{
++			assignedTotal =
++				(totalUnique
++				 - 1
++				 - static_cast<size_t>(
++					 worker))
++				/ static_cast<size_t>(
++					workerCount)
++				+ 1;
++		}
++
++		if (scanLimit > 0
++		    && static_cast<uint64_t>(
++			    scanLimit)
++		       < assignedTotal)
++		{
++			assignedTotal =
++				static_cast<size_t>(
++					scanLimit);
++		}
++
++		std::fprintf(
++			stderr,
++			"raw X range         : %lld..%lld\n"
++			"raw Y range         : %lld..%lld\n"
++			"unique plans        : %zu\n"
++			"assigned to worker  : %zu\n"
++			"starting scan...\n\n",
++			static_cast<long long>(scanXMin),
++			static_cast<long long>(scanXMax),
++			static_cast<long long>(scanYMin),
++			static_cast<long long>(scanYMax),
++			totalUnique,
++			assignedTotal);
++
++		std::fflush(stderr);
++
++		/*
++		 * bestScore == maxFrames + 1 means we have not found an
++		 * HIO yet.
++		 */
++		int64_t bestScore =
++			maxFrames + 1;
++
++
++		int sharedBestFd = -1;
++		int32_t *sharedBest = nullptr;
++
++		if (sharedBestPath &&
++		    sharedBestPath[0])
++		{
++			sharedBestFd =
++				::open(
++					sharedBestPath,
++					O_RDWR);
++
++			if (sharedBestFd < 0)
++			{
++				return fail(
++					metaPath,
++					"scan: could not open shared-best file");
++			}
++
++			struct stat st{};
++
++			if (::fstat(
++					sharedBestFd,
++					&st) != 0 ||
++			    st.st_size <
++				    static_cast<off_t>(
++					    sizeof(int32_t)))
++			{
++				return fail(
++					metaPath,
++					"scan: shared-best file is invalid");
++			}
++
++			void *mapping =
++				::mmap(
++					nullptr,
++					sizeof(int32_t),
++					PROT_READ |
++						PROT_WRITE,
++					MAP_SHARED,
++					sharedBestFd,
++					0);
++
++			if (mapping == MAP_FAILED)
++			{
++				return fail(
++					metaPath,
++					"scan: mmap shared-best failed");
++			}
++
++			sharedBest =
++				static_cast<int32_t *>(
++					mapping);
++
++			std::fprintf(
++				stderr,
++				"shared incumbent    : %d\n",
++				__atomic_load_n(
++					sharedBest,
++					__ATOMIC_RELAXED));
++		}
++
++		std::vector<size_t> bestPlanIndices;
++
++		uint64_t evaluated = 0;
++		uint64_t executedFrames = 0;
++		uint64_t stateLoads = 0;
++		uint64_t hiosSeen = 0;
++
++		const auto scanStart =
++			std::chrono::steady_clock::now();
++
++		for (size_t planIndex =
++			     static_cast<size_t>(worker);
++		     planIndex < totalUnique;
++		     planIndex +=
++			     static_cast<size_t>(
++				     workerCount))
++		{
++			if (scanLimit > 0
++			    && evaluated >=
++			       static_cast<uint64_t>(
++				       scanLimit))
++			{
++				break;
++			}
++
++			const minigolf_scan::UniquePlan &u =
++				plans[planIndex];
++
++			const minigolf_scan::Plan &plan =
++				u.plan;
++
++			if (ce_session_load_state(
++					session,
++					baseState.data(),
++					baseState.size()) != 0)
++			{
++				return fail(
++					metaPath,
++					std::string(
++						"scan state load: ")
++					+ ce_session_last_error(
++						session));
++			}
++
++			stateLoads++;
++
++			if (ram[HOLE_ADDRESS]
++			    != START_HOLE)
++			{
++				char buf[200];
++
++				std::snprintf(
++					buf,
++					sizeof buf,
++					"scan: plan %zu restored hole byte %u, expected %u",
++					planIndex,
++					static_cast<unsigned>(
++						ram[HOLE_ADDRESS]),
++					static_cast<unsigned>(
++						START_HOLE));
++
++				return fail(
++					metaPath,
++					buf);
++			}
++
++			/*
++			 * Include the current incumbent frame so that equal
++			 * optimal results are not lost.
++			 */
++
++			if (sharedBest)
++			{
++				const int32_t shared =
++					__atomic_load_n(
++						sharedBest,
++						__ATOMIC_RELAXED);
++
++				if (shared > 0 &&
++				    shared <= maxFrames &&
++				    shared < bestScore)
++				{
++					bestScore =
++						shared;
++
++					bestPlanIndices.clear();
++				}
++			}
++
++int64_t cutoff =
++				bestScore <= maxFrames
++					? bestScore
++					: maxFrames;
++
++			int64_t score = -1;
++
++			for (int64_t n = 0;
++			     n < cutoff;
++			     n++)
++			{
++				/*
++				 * Always explicitly drive the private button.
++				 * The hybrid core consumes it before guest input.
++				 */
++				ce_session_set_button(
++					session,
++					SEARCH_DYNAMIC_BUTTON,
++					(switchDynamic
++					 && n == 0)
++						? 1
++						: 0);
++
++				if (static_cast<size_t>(n)
++				    < plan.frames.size())
++				{
++					setMouse(
++						plan.frames[
++							static_cast<size_t>(
++								n)]);
++				}
++				else
++				{
++					setMouse(
++						neutral);
++				}
++
++				ce_session_frame_advance(
++					session,
++					0,
++					0);
++
++				executedFrames++;
++
++				if (const char *death =
++						ce_session_guest_death(
++							session))
++				{
++					char buf[512];
++
++					std::snprintf(
++						buf,
++						sizeof buf,
++						"scan guest death at plan %zu: %s",
++						planIndex,
++						death);
++
++					return fail(
++						metaPath,
++						buf);
++				}
++
++				const uint8_t hole =
++					ram[HOLE_ADDRESS];
++
++				if (hole == NEXT_HOLE)
++				{
++					score = n + 1;
++					break;
++				}
++
++				if (hole != START_HOLE)
++				{
++					char buf[256];
++
++					std::snprintf(
++						buf,
++						sizeof buf,
++						"scan: unexpected hole byte %u at plan %zu after %lld advances",
++						static_cast<unsigned>(
++							hole),
++						planIndex,
++						static_cast<long long>(
++							n + 1));
++
++					return fail(
++						metaPath,
++						buf);
++				}
++			}
++
++			evaluated++;
++
++			if (score >= 0)
++			{
++				hiosSeen++;
++
++				if (sharedBest)
++				{
++					int32_t current =
++						__atomic_load_n(
++							sharedBest,
++							__ATOMIC_RELAXED);
++
++					while (score < current)
++					{
++						int32_t expected =
++							current;
++
++						if (__atomic_compare_exchange_n(
++								sharedBest,
++								&expected,
++								static_cast<int32_t>(
++									score),
++								false,
++								__ATOMIC_SEQ_CST,
++								__ATOMIC_SEQ_CST))
++						{
++							std::fprintf(
++								stderr,
++								"SHARED_BEST "
++								"worker=%lld "
++								"score=%lld "
++								"plan=%zu "
++								"raw=%d,%d "
++								"dx=%+d "
++								"dy=%+d\n",
++								static_cast<long long>(
++									worker),
++								static_cast<long long>(
++									score),
++								planIndex,
++								u.canonicalX,
++								u.canonicalY,
++								plan.dx,
++								plan.dy);
++
++							std::fflush(
++								stderr);
++
++							break;
++						}
++
++						current =
++							expected;
++					}
++				}
++
++
++				if (score < bestScore)
++				{
++					bestScore =
++						score;
++
++					bestPlanIndices.clear();
++					bestPlanIndices.push_back(
++						planIndex);
++
++					std::fprintf(
++						stderr,
++						"NEW_BEST "
++						"worker=%lld "
++						"score=%lld "
++						"plan=%zu "
++						"raw=%d,%d "
++						"aliases=%u "
++						"dx=%+d "
++						"dy=%+d "
++						"input_frames=%zu "
++						"evaluated=%llu\n",
++						static_cast<long long>(
++							worker),
++						static_cast<long long>(
++							score),
++						planIndex,
++						u.canonicalX,
++						u.canonicalY,
++						u.aliases,
++						plan.dx,
++						plan.dy,
++						plan.frames.size(),
++						static_cast<unsigned long long>(
++							evaluated));
++
++					std::fflush(stderr);
++				}
++				else if (score == bestScore)
++				{
++					bestPlanIndices.push_back(
++						planIndex);
++
++					std::fprintf(
++						stderr,
++						"TIE_BEST "
++						"worker=%lld "
++						"score=%lld "
++						"plan=%zu "
++						"raw=%d,%d "
++						"aliases=%u "
++						"dx=%+d "
++						"dy=%+d "
++						"input_frames=%zu "
++						"evaluated=%llu\n",
++						static_cast<long long>(
++							worker),
++						static_cast<long long>(
++							score),
++						planIndex,
++						u.canonicalX,
++						u.canonicalY,
++						u.aliases,
++						plan.dx,
++						plan.dy,
++						plan.frames.size(),
++						static_cast<unsigned long long>(
++							evaluated));
++
++					std::fflush(stderr);
++				}
++			}
++
++			if (progressEvery > 0
++			    && evaluated
++			       % static_cast<uint64_t>(
++				       progressEvery)
++			       == 0)
++			{
++				const auto now =
++					std::chrono::
++						steady_clock::now();
++
++				const double seconds =
++					std::chrono::
++						duration<double>(
++							now
++							- scanStart)
++						.count();
++
++				const double rate =
++					seconds > 0
++						? static_cast<double>(
++							evaluated)
++							/ seconds
++						: 0.0;
++
++				std::fprintf(
++					stderr,
++					"PROGRESS "
++					"worker=%lld "
++					"done=%llu/%zu "
++					"best=%lld "
++					"frames=%llu "
++					"rate=%.3f_plans_per_sec\n",
++					static_cast<long long>(
++						worker),
++					static_cast<unsigned long long>(
++						evaluated),
++					assignedTotal,
++					static_cast<long long>(
++						bestScore <= maxFrames
++							? bestScore
++							: -1),
++					static_cast<unsigned long long>(
++						executedFrames),
++					rate);
++
++				std::fflush(stderr);
++			}
++		}
++
++		const auto scanEnd =
++			std::chrono::steady_clock::now();
++
++		const double scanSeconds =
++			std::chrono::duration<double>(
++				scanEnd - scanStart)
++				.count();
++
++		const double candidateRate =
++			scanSeconds > 0
++				? static_cast<double>(
++					evaluated)
++					/ scanSeconds
++				: 0.0;
++
++		const double frameRate =
++			scanSeconds > 0
++				? static_cast<double>(
++					executedFrames)
++					/ scanSeconds
++				: 0.0;
++
++		const int64_t finalBest =
++			bestScore <= maxFrames
++				? bestScore
++				: -1;
++
++		std::fprintf(
++			stderr,
++			"\n=== Exhaustive worker complete ===\n"
++			"worker              : %lld / %lld\n"
++			"evaluated           : %llu\n"
++			"state loads         : %llu\n"
++			"frames executed     : %llu\n"
++			"HIOs observed       : %llu\n"
++			"best score          : %lld\n"
++			"best-plan count     : %zu\n"
++			"scan seconds        : %.3f\n"
++			"plans/sec           : %.3f\n"
++			"guest frames/sec    : %.3f\n",
++			static_cast<long long>(
++				worker),
++			static_cast<long long>(
++				workerCount),
++			static_cast<unsigned long long>(
++				evaluated),
++			static_cast<unsigned long long>(
++				stateLoads),
++			static_cast<unsigned long long>(
++				executedFrames),
++			static_cast<unsigned long long>(
++				hiosSeen),
++			static_cast<long long>(
++				finalBest),
++			bestPlanIndices.size(),
++			scanSeconds,
++			candidateRate,
++			frameRate);
++
++		/*
++		 * Machine-readable final results.  These, rather than the
++		 * transient NEW_BEST lines, are what the merge step consumes.
++		 */
++		for (size_t planIndex :
++		     bestPlanIndices)
++		{
++			const minigolf_scan::UniquePlan &u =
++				plans[planIndex];
++
++			const minigolf_scan::Plan &plan =
++				u.plan;
++
++			std::fprintf(
++				stderr,
++				"SCAN_BEST "
++				"worker=%lld "
++				"score=%lld "
++				"plan=%zu "
++				"raw=%d,%d "
++				"aliases=%u "
++				"x_bounds=%d..%d "
++				"y_bounds=%d..%d "
++				"dx=%+d "
++				"dy=%+d "
++				"input_frames=%zu\n",
++				static_cast<long long>(
++					worker),
++				static_cast<long long>(
++					finalBest),
++				planIndex,
++				u.canonicalX,
++				u.canonicalY,
++				u.aliases,
++				u.minX,
++				u.maxX,
++				u.minY,
++				u.maxY,
++				plan.dx,
++				plan.dy,
++				plan.frames.size());
++		}
++
++		std::fprintf(
++			stderr,
++			"SCAN_RESULT "
++			"worker=%lld "
++			"workers=%lld "
++			"evaluated=%llu "
++			"best=%lld "
++			"ties=%zu "
++			"frames=%llu "
++			"seconds=%.6f\n",
++			static_cast<long long>(
++				worker),
++			static_cast<long long>(
++				workerCount),
++			static_cast<unsigned long long>(
++				evaluated),
++			static_cast<long long>(
++				finalBest),
++			bestPlanIndices.size(),
++			static_cast<unsigned long long>(
++				executedFrames),
++			scanSeconds);
++
++		std::fflush(stderr);
++
++		return 0;
++	}
++
+ 	std::vector<uint8_t> state;
+ 	if (rerecord)
+ 	{
+diff --git a/source/engine/tools/minigolf_scan_impl.h b/source/engine/tools/minigolf_scan_impl.h
+new file mode 100755
+index 0000000..6c344a8
+--- /dev/null
++++ b/source/engine/tools/minigolf_scan_impl.h
+@@ -0,0 +1,732 @@
++#pragma once
++
++#include <array>
++#include <cstdint>
++#include <cstdio>
++#include <stdexcept>
++#include <string>
++#include <unordered_map>
++#include <vector>
++
++namespace minigolf_scan
++{
++
++/*
++ * Default planner configuration.
++ *
++ * The exhaustive scanner overrides the cursor and starting-carrier
++ * values at runtime for the course being searched.
++ *
++ * Video:               640x480
++ * Display Input plane: 2560x2048
++ */
++static constexpr int CURSOR_X = 672;
++static constexpr int CURSOR_Y = 644;
++
++static constexpr int START_AXIS_X = 1280;
++static constexpr int START_AXIS_Y = 1024;
++
++static constexpr int VIDEO_W = 640;
++static constexpr int VIDEO_H = 480;
++
++static constexpr int X_MIN = 0;
++static constexpr int X_MAX = 2560;
++static constexpr int X_NEUTRAL = 1280;
++
++static constexpr int Y_MIN = 0;
++static constexpr int Y_MAX = 2048;
++static constexpr int Y_NEUTRAL = 1024;
++
++static constexpr int LEGAL_X_MIN = 12;
++static constexpr int LEGAL_X_MAX = 2536;
++static constexpr int LEGAL_Y_MIN = 260;
++static constexpr int LEGAL_Y_MAX = 2018;
++
++static constexpr int MAX_POSITION_DELTA = 255;
++static constexpr int MAX_EXPLICIT_SPEED = 180;
++
++static constexpr int CLICK_NUDGE_X = 0;
++static constexpr int CLICK_NUDGE_Y = 1;
++
++/*
++ * Runtime planner state.
++ *
++ * The exhaustive scanner overrides these values before generating
++ * candidate plans.
++ */
++static int ACTIVE_CURSOR_X = CURSOR_X;
++static int ACTIVE_CURSOR_Y = CURSOR_Y;
++static int ACTIVE_START_AXIS_X = START_AXIS_X;
++static int ACTIVE_START_AXIS_Y = START_AXIS_Y;
++
++static inline void configure_planner(
++	int cursorX,
++	int cursorY,
++	int startAxisX,
++	int startAxisY)
++{
++	ACTIVE_CURSOR_X = cursorX;
++	ACTIVE_CURSOR_Y = cursorY;
++	ACTIVE_START_AXIS_X = startAxisX;
++	ACTIVE_START_AXIS_Y = startAxisY;
++}
++
++struct AxisStep
++{
++	int pos;
++	int speed;
++	int moved;
++};
++
++struct PathPoint
++{
++	int x;
++	int y;
++	int speedX;
++	int speedY;
++	int movedX;
++	int movedY;
++};
++
++struct MouseFrame
++{
++	int32_t x;
++	int32_t y;
++	int32_t speedX;
++	int32_t speedY;
++	int32_t left;
++};
++
++struct Plan
++{
++	int targetX = 0;
++	int targetY = 0;
++	int dx = 0;
++	int dy = 0;
++
++	int moveFrames = 0;
++	int finalAxisX = 0;
++	int finalAxisY = 0;
++
++	int nudgeX = 0;
++	int nudgeY = 0;
++
++	std::vector<MouseFrame> frames;
++};
++
++struct UniquePlan
++{
++	Plan plan;
++
++	/* First raw coordinate encountered: canonical representative. */
++	int canonicalX = 0;
++	int canonicalY = 0;
++
++	/* Raw-coordinate class bounds and size. */
++	int minX = 0;
++	int maxX = 0;
++	int minY = 0;
++	int maxY = 0;
++	uint32_t aliases = 0;
++};
++
++/*
++ * Lua round_nearest():
++ *
++ *   v >= 0 -> floor(v + 0.5)
++ *   v <  0 -> ceil (v - 0.5)
++ *
++ * Do it as integer rational arithmetic so no floating-point rounding
++ * differences can creep into the exhaustive enumerator.
++ */
++static inline int round_ratio_half_away(int64_t numerator,
++                                        int64_t denominator)
++{
++	const bool negative = numerator < 0;
++	uint64_t a = static_cast<uint64_t>(
++		negative ? -numerator : numerator);
++
++	uint64_t q = a / static_cast<uint64_t>(denominator);
++	const uint64_t r =
++		a % static_cast<uint64_t>(denominator);
++
++	if (r * 2 >= static_cast<uint64_t>(denominator))
++		q++;
++
++	const int out = static_cast<int>(q);
++	return negative ? -out : out;
++}
++
++static inline void cursor_delta_to_mickeys(
++	int targetX,
++	int targetY,
++	int &dx,
++	int &dy)
++{
++	dx = round_ratio_half_away(
++		static_cast<int64_t>(targetX - ACTIVE_CURSOR_X) * VIDEO_W,
++		X_MAX - X_MIN);
++
++	dy = round_ratio_half_away(
++		static_cast<int64_t>(targetY - ACTIVE_CURSOR_Y) * VIDEO_H,
++		Y_MAX - Y_MIN);
++}
++
++static inline AxisStep plan_axis_frame(
++	int pos,
++	int remaining,
++	int minv,
++	int maxv)
++{
++	if (remaining == 0)
++		return {pos, 0, 0};
++
++	const int dir = remaining > 0 ? 1 : -1;
++	const int amount =
++		remaining > 0 ? remaining : -remaining;
++
++	const int room =
++		dir > 0 ? (maxv - pos) : (pos - minv);
++
++	int positionAmount = amount;
++	if (positionAmount > MAX_POSITION_DELTA)
++		positionAmount = MAX_POSITION_DELTA;
++	if (positionAmount > room)
++		positionAmount = room;
++
++	int explicitAmount = amount;
++	if (explicitAmount > MAX_EXPLICIT_SPEED)
++		explicitAmount = MAX_EXPLICIT_SPEED;
++
++	if (positionAmount >= explicitAmount &&
++	    positionAmount > 0)
++	{
++		const int moved = dir * positionAmount;
++		return {pos + moved, 0, moved};
++	}
++
++	const int moved = dir * explicitAmount;
++
++	/*
++	 * Explicit Mouse Speed takes precedence for guest motion,
++	 * while the absolute carrier is moved to the opposite boundary
++	 * to re-arm it for a later position-derived frame.
++	 */
++	const int rearmedPos =
++		dir > 0 ? minv : maxv;
++
++	return {rearmedPos, moved, moved};
++}
++
++static inline bool fit_click_nudge(
++	int pos,
++	int requested,
++	int minv,
++	int maxv,
++	int pressSpeed,
++	int pressMoved,
++	int &result)
++{
++	if (requested == 0)
++	{
++		result = 0;
++		return true;
++	}
++
++	auto fits = [&](int n) -> bool
++	{
++		if (pos + n < minv || pos + n > maxv)
++			return false;
++
++		if (pressSpeed != 0)
++		{
++			const int v = pressSpeed + n;
++			if (v < -MAX_EXPLICIT_SPEED ||
++			    v >  MAX_EXPLICIT_SPEED)
++				return false;
++		}
++		else
++		{
++			const int v = pressMoved + n;
++			if (v < -MAX_POSITION_DELTA ||
++			    v >  MAX_POSITION_DELTA)
++				return false;
++		}
++
++		return true;
++	};
++
++	if (fits(requested))
++	{
++		result = requested;
++		return true;
++	}
++
++	if (fits(-requested))
++	{
++		result = -requested;
++		return true;
++	}
++
++	return false;
++}
++
++static inline Plan build_plan(int targetX, int targetY)
++{
++	Plan plan;
++	plan.targetX = targetX;
++	plan.targetY = targetY;
++
++	cursor_delta_to_mickeys(
++		targetX, targetY,
++		plan.dx, plan.dy);
++
++	std::vector<PathPoint> path;
++
++	int axisX = ACTIVE_START_AXIS_X;
++	int axisY = ACTIVE_START_AXIS_Y;
++	int remX = plan.dx;
++	int remY = plan.dy;
++
++	while (remX != 0 || remY != 0)
++	{
++		const AxisStep sx =
++			plan_axis_frame(
++				axisX, remX,
++				X_MIN, X_MAX);
++
++		const AxisStep sy =
++			plan_axis_frame(
++				axisY, remY,
++				Y_MIN, Y_MAX);
++
++		path.push_back({
++			sx.pos,
++			sy.pos,
++			sx.speed,
++			sy.speed,
++			sx.moved,
++			sy.moved
++		});
++
++		axisX = sx.pos;
++		axisY = sy.pos;
++
++		remX -= sx.moved;
++		remY -= sy.moved;
++
++		if (path.size() > 64)
++			throw std::runtime_error(
++				"mouse path exceeded 64 frames");
++	}
++
++	plan.moveFrames =
++		static_cast<int>(path.size());
++
++	plan.finalAxisX = axisX;
++	plan.finalAxisY = axisY;
++
++	/*
++	 * Fastest possible click:
++	 *
++	 * If movement exists, press on its final frame.
++	 * With no movement, press on candidate frame zero.
++	 */
++	const int pressFrame =
++		path.empty()
++			? 0
++			: static_cast<int>(path.size()) - 1;
++
++	const int releaseFrame =
++		pressFrame + 1;
++
++	int pressSpeedX = 0;
++	int pressSpeedY = 0;
++	int pressMovedX = 0;
++	int pressMovedY = 0;
++
++	if (!path.empty())
++	{
++		const PathPoint &p = path.back();
++
++		pressSpeedX = p.speedX;
++		pressSpeedY = p.speedY;
++		pressMovedX = p.movedX;
++		pressMovedY = p.movedY;
++	}
++
++	if (!fit_click_nudge(
++			axisX,
++			CLICK_NUDGE_X,
++			X_MIN, X_MAX,
++			pressSpeedX,
++			pressMovedX,
++			plan.nudgeX))
++	{
++		throw std::runtime_error(
++			"could not fit X click nudge");
++	}
++
++	if (!fit_click_nudge(
++			axisY,
++			CLICK_NUDGE_Y,
++			Y_MIN, Y_MAX,
++			pressSpeedY,
++			pressMovedY,
++			plan.nudgeY))
++	{
++		throw std::runtime_error(
++			"could not fit Y click nudge");
++	}
++
++	/*
++	 * Path frames.
++	 */
++	for (size_t i = 0; i < path.size(); i++)
++	{
++		const int f = static_cast<int>(i);
++		const bool left = (f == pressFrame);
++
++		int x = path[i].x;
++		int y = path[i].y;
++		int speedX = path[i].speedX;
++		int speedY = path[i].speedY;
++
++		if (left)
++		{
++			x += plan.nudgeX;
++			y += plan.nudgeY;
++
++			if (speedX != 0)
++				speedX += plan.nudgeX;
++
++			if (speedY != 0)
++				speedY += plan.nudgeY;
++		}
++
++		plan.frames.push_back({
++			x, y,
++			speedX, speedY,
++			left ? 1 : 0
++		});
++	}
++
++	/*
++	 * Stationary press/release portion.
++	 *
++	 * For a moving shot this contributes only the release frame.
++	 * For a zero-displacement shot this writes both press and release.
++	 */
++	const int firstStationary =
++		path.empty()
++			? 0
++			: static_cast<int>(path.size());
++
++	for (int f = firstStationary;
++	     f <= releaseFrame;
++	     f++)
++	{
++		const bool left = (f == pressFrame);
++
++		int x = axisX;
++		int y = axisY;
++
++		if (left)
++		{
++			x += plan.nudgeX;
++			y += plan.nudgeY;
++		}
++
++		plan.frames.push_back({
++			x, y,
++			0, 0,
++			left ? 1 : 0
++		});
++	}
++
++	/*
++	 * Re-arm TAStudio's position carriers to neutral after release.
++	 *
++	 * First cleanup frame: one-mickey excursion.
++	 * Second cleanup frame: the opposite position-derived mickey
++	 * returns the guest cursor to the same final location.
++	 */
++	if (axisX != X_NEUTRAL ||
++	    axisY != Y_NEUTRAL)
++	{
++		int sx = 0;
++		int sy = 0;
++
++		int stageX = X_NEUTRAL;
++		int stageY = Y_NEUTRAL;
++
++		if (axisX != X_NEUTRAL)
++		{
++			sx = axisX < X_NEUTRAL ? 1 : -1;
++			stageX = X_NEUTRAL + sx;
++		}
++
++		if (axisY != Y_NEUTRAL)
++		{
++			sy = axisY < Y_NEUTRAL ? 1 : -1;
++			stageY = Y_NEUTRAL + sy;
++		}
++
++		plan.frames.push_back({
++			stageX, stageY,
++			sx, sy,
++			0
++		});
++
++		plan.frames.push_back({
++			X_NEUTRAL,
++			Y_NEUTRAL,
++			0, 0,
++			0
++		});
++	}
++
++	return plan;
++}
++
++/*
++ * Binary key for the COMPLETE generated input sequence.
++ *
++ * We deliberately dedupe the actual sequence delivered to DOSBox-X,
++ * rather than merely assuming equal raw coordinates or equal dx/dy
++ * are equivalent.
++ */
++static inline void append_i32(
++	std::string &s,
++	int32_t v)
++{
++	const uint32_t u =
++		static_cast<uint32_t>(v);
++
++	s.push_back(
++		static_cast<char>((u >> 0) & 0xff));
++	s.push_back(
++		static_cast<char>((u >> 8) & 0xff));
++	s.push_back(
++		static_cast<char>((u >> 16) & 0xff));
++	s.push_back(
++		static_cast<char>((u >> 24) & 0xff));
++}
++
++static inline std::string plan_signature(
++	const Plan &plan)
++{
++	std::string s;
++
++	s.reserve(
++		4 +
++		plan.frames.size() * 20);
++
++	append_i32(
++		s,
++		static_cast<int32_t>(
++			plan.frames.size()));
++
++	for (const MouseFrame &f : plan.frames)
++	{
++		append_i32(s, f.x);
++		append_i32(s, f.y);
++		append_i32(s, f.speedX);
++		append_i32(s, f.speedY);
++		append_i32(s, f.left);
++	}
++
++	return s;
++}
++
++static inline std::vector<UniquePlan>
++enumerate_unique_plans_range(
++	int xMin,
++	int xMax,
++	int yMin,
++	int yMax)
++{
++	std::vector<UniquePlan> unique;
++	unique.reserve(270000);
++
++	std::unordered_map<std::string, size_t> seen;
++	seen.reserve(300000);
++
++	for (int x = xMin;
++	     x <= xMax;
++	     x++)
++	{
++		for (int y = yMin;
++		     y <= yMax;
++		     y++)
++		{
++			Plan plan =
++				build_plan(x, y);
++
++			std::string sig =
++				plan_signature(plan);
++
++			const auto it =
++				seen.find(sig);
++
++			if (it == seen.end())
++			{
++				const size_t index =
++					unique.size();
++
++				UniquePlan u;
++				u.plan = std::move(plan);
++
++				u.canonicalX = x;
++				u.canonicalY = y;
++
++				u.minX = x;
++				u.maxX = x;
++				u.minY = y;
++				u.maxY = y;
++
++				u.aliases = 1;
++
++				unique.push_back(
++					std::move(u));
++
++				seen.emplace(
++					std::move(sig),
++					index);
++			}
++			else
++			{
++				UniquePlan &u =
++					unique[it->second];
++
++				u.aliases++;
++
++				if (x < u.minX) u.minX = x;
++				if (x > u.maxX) u.maxX = x;
++				if (y < u.minY) u.minY = y;
++				if (y > u.maxY) u.maxY = y;
++			}
++		}
++	}
++
++	return unique;
++}
++
++static inline std::vector<UniquePlan>
++enumerate_unique_plans()
++{
++	return enumerate_unique_plans_range(
++		LEGAL_X_MIN,
++		LEGAL_X_MAX,
++		LEGAL_Y_MIN,
++		LEGAL_Y_MAX);
++}
++
++
++static inline int run_precompute()
++{
++	const uint64_t rawCount =
++		static_cast<uint64_t>(
++			LEGAL_X_MAX -
++			LEGAL_X_MIN + 1)
++		*
++		static_cast<uint64_t>(
++			LEGAL_Y_MAX -
++			LEGAL_Y_MIN + 1);
++
++	std::printf(
++		"=== Minigolf exhaustive precompute ===\n");
++
++	std::printf(
++		"cursor              : %d,%d\n",
++		CURSOR_X, CURSOR_Y);
++
++	std::printf(
++		"start carrier       : %d,%d\n",
++		START_AXIS_X,
++		START_AXIS_Y);
++
++	std::printf(
++		"video               : %dx%d\n",
++		VIDEO_W, VIDEO_H);
++
++	std::printf(
++		"legal X             : %d..%d\n",
++		LEGAL_X_MIN,
++		LEGAL_X_MAX);
++
++	std::printf(
++		"legal Y             : %d..%d\n",
++		LEGAL_Y_MIN,
++		LEGAL_Y_MAX);
++
++	std::printf(
++		"raw coordinates     : %llu\n",
++		static_cast<unsigned long long>(
++			rawCount));
++
++	std::fflush(stdout);
++
++	std::vector<UniquePlan> plans =
++		enumerate_unique_plans();
++
++	std::printf(
++		"unique input plans  : %zu\n",
++		plans.size());
++
++	double reduction =
++		plans.empty()
++			? 0.0
++			: static_cast<double>(rawCount)
++				/ static_cast<double>(
++					plans.size());
++
++	std::printf(
++		"dedup factor        : %.4fx\n",
++		reduction);
++
++	std::array<uint64_t, 128> histogram{};
++
++	size_t maxFrames = 0;
++
++	for (size_t i = 0;
++	     i < plans.size();
++	     i++)
++	{
++		const size_t n =
++			plans[i].plan.frames.size();
++
++		if (n < histogram.size())
++			histogram[n]++;
++
++		if (n > maxFrames)
++			maxFrames = n;
++
++
++	}
++
++	std::printf(
++		"max generated frames: %zu\n",
++		maxFrames);
++
++	std::printf(
++		"\nplan length histogram:\n");
++
++	for (size_t i = 0;
++	     i < histogram.size();
++	     i++)
++	{
++		if (histogram[i] != 0)
++		{
++			std::printf(
++				"  %zu frames : %llu plans\n",
++				i,
++				static_cast<unsigned long long>(
++					histogram[i]));
++		}
++	}
++
++	return 0;
++}
++
++} // namespace minigolf_scan

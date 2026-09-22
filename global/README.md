@@ -35,28 +35,6 @@ global/
 
 The scripts wrap state generation, worker launching, monitoring, and result collection, cf. below
 
-## Tested source revisions
-
-| Component | Version/Revision |
-| --- | --- |
-| Chimera | [Nightly 2026-09-17 (82072264)](https://github.com/ToolAssisted-run/chimera/releases#release-nightly-2026-09-17) |
-| chimera-common-minibox | [2026-09-22, forked for preservation at 7:50 pm](https://github.com/toca-1/chimera-common-minibox-2026-09-22) |
-| chimera-core-dosbox-x | [Nightly 2026-09-18](https://github.com/ToolAssisted-run/chimera-core-dosbox-x/releases#release-nightly-2026-09-18) |
-| DOSBox-X | [dosbox-x-v2026.08.02](https://github.com/joncampbell123/dosbox-x/releases/tag/dosbox-x-v2026.08.02) |
-
-The DOSBox-X settings used by the TAS are:
-
-```text
-preset = 1997_ibm_aptiva_2140
-boot drive = C:
-memsize = -1
-cycles = -1
-mouse enabled = true
-Mouse Relative Sensitivity = 1
-joystick 1 = disabled
-joystick 2 = disabled
-```
-
 ## Search model
 
 The Display Input coordinate range used by the mouse interface is X = 0..2560, Y = 0..2048 (basis for relative mouse movement). However, not all positions are valid (border of window, etc.) so the search rectangle is only X = 12..2536, Y = 260..2018 which, thus, contains 4,441,475 raw coordinates. However, because the OS resolution is only 640x480, many raw coordinates generate exactly the same mouse movement so there are only 261,016 unique input plans which the script has to search.
@@ -81,7 +59,7 @@ The following is confirmed to work on Ubuntu 26.04 so, unless that is your syste
 2. Run the commands
 ```
 wsl --update
-wsl ---list --online
+wsl --list --online
 wsl --install -d Ubuntu-26.04
 ```
 3. Go through the installation. Name the user account `tas2604` (with a password of your choice)

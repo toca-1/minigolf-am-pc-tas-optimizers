@@ -82,7 +82,8 @@ wsl --update
 wsl ---list --online
 wsl --install -d Ubuntu-26.04
 ```
-3. Afterwards, restart your PC
+3. Go through the installation. Name the user account `tas2604` (with a password of your choice)
+4. Restart Windows
 
 # TO DO
 

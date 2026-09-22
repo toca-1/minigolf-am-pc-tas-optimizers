@@ -244,7 +244,7 @@ e.g.,
 cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 ./run_global_search.sh 10 1997 1000 486 75
 ```
-to brute-force hole 10 if it starts on frame 1000 with initial mouse coordinates X=486, Y=75. One other thing to note about the search is that workers share a memory-mapped incumbent file, so when one worker finds a faster result, the other workers can immediately adopt the lower frame cutoff.
+to brute-force hole 10 if it starts on frame 1997 with initial mouse coordinates X=1000, Y=486 and an upper limit of 75 frames per candidate. One other thing to note about the search is that workers share a memory-mapped incumbent file, so when one worker finds a faster result, the other workers can immediately adopt the lower frame cutoff.
 
 To monitor the progress of the search, open another PowerShell window and go into the VM (`wsl -d Ubuntu-26.04`). The monitor is started with the following syntax:
 ```

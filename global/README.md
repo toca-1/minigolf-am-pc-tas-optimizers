@@ -12,7 +12,7 @@ global/
 │   └── minibox-gcc15-build-fix.patch
 ├── project/
 │   └── minigolf.chimeraProject
-├── scripts/
+└── scripts/
     ├── run_global_search.sh
     └── monitor_global_search.py
 ```

@@ -84,12 +84,44 @@ wsl --install -d Ubuntu-26.04
 ```
 3. Go through the installation. Name the user account `tas2604` (with a password of your choice)
 4. Restart Windows
+5. Re-launch PowerShell
+6. Enter `wsl -d Ubuntu-26.04` in PowerShell to get into the Ubuntu VM
+7. Run
+```
+sudo apt update
+sudo apt full-upgrade -y
+```
+8. Install all the dependencies this project needs by pasting the following into the terminal:
+```
+sudo apt install -y \
+  build-essential \
+  git \
+  meson \
+  ninja-build \
+  cmake \
+  curl \
+  python3 \
+  perl \
+  time \
+  procps \
+  util-linux \
+  gawk \
+  xz-utils \
+  patch \
+  pkg-config \
+  ca-certificates
+```
+9. Clone this repository:
+```
+mkdir -p ~/src
+cd ~/src
 
-# TO DO
+git clone https://github.com/toca-1/minigolf-am-pc-tas-optimizers.git
+```
 
 ## 1. Build patched Chimera
 
-```bash
+```
 git clone https://github.com/ToolAssisted-run/chimera.git
 cd chimera
 git checkout e799a4078f9e757dad15ceb13db59f1d5b2dad26
@@ -98,13 +130,13 @@ git submodule update --init --recursive
 
 Apply the scanner patch:
 
-```bash
+```
 git apply /path/to/global/patches/chimera-global-scanner.patch
 ```
 
 Build `chimera-run` and the runtime libraries it needs:
 
-```bash
+```
 meson setup build/meson-linux \
   --prefix "$(pwd)/build" \
   --libdir dll
@@ -118,7 +150,7 @@ meson compile \
 
 ## 2. Build the miniBox C++ guest toolchain
 
-```bash
+```
 git clone https://github.com/ToolAssisted-run/chimera-common-minibox.git
 cd chimera-common-minibox
 git checkout 427f6ed7972867638891d7ceb0e81ed9e9ab7db4
@@ -126,25 +158,25 @@ git checkout 427f6ed7972867638891d7ceb0e81ed9e9ab7db4
 
 Apply:
 
-```bash
+```
 git apply /path/to/global/patches/minibox-gcc15-build-fix.patch
 ```
 
 Configure the C++ guest build:
 
-```bash
+```
 meson setup build/meson-cpp -Dguest_cpp=true
 ```
 
 Build the guest C++ sysroot:
 
-```bash
+```
 meson compile -C build/meson-cpp libstdcxx
 ```
 
 The DOSBox-X core link also requires these miniBox guest objects:
 
-```bash
+```
 ninja \
   -C build/meson-cpp \
   source/guest/cxxglue.c.o \
@@ -153,7 +185,7 @@ ninja \
 
 ## 3. Build the hybrid DOSBox-X core
 
-```bash
+```
 git clone https://github.com/ToolAssisted-run/chimera-core-dosbox-x.git
 cd chimera-core-dosbox-x
 git checkout 42c7f7fd0df71f7727f5139be06a3fe948660578
@@ -169,20 +201,20 @@ tag: dosbox-x-v2026.08.02
 
 Apply the hybrid patch:
 
-```bash
+```
 git apply /path/to/global/patches/dosbox-x-hybrid-core.patch
 ```
 
 Configure the Waterbox guest build:
 
-```bash
+```
 ./waterbox/setup-guest.sh \
   -m /path/to/chimera-common-minibox
 ```
 
 Build:
 
-```bash
+```
 meson compile \
   -C build/meson-guest \
   core.wbx
@@ -190,7 +222,7 @@ meson compile \
 
 Package the core:
 
-```bash
+```
 ./waterbox/build-package.sh \
   -m /path/to/chimera-common-minibox \
   -r /path/to/chimera

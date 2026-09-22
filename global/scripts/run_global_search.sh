@@ -4,32 +4,38 @@ set -euo pipefail
 usage() {
 	cat >&2 <<'EOF'
 Usage:
-  ./run_global_search.sh currentHoleNumber initialX initialY frames_upperlimit
+  ./run_global_search.sh currentHoleNumber startingFrame initialX initialY frames_upperlimit
 
 Example:
-  ./run_global_search.sh 10 1000 486 75
+  ./run_global_search.sh 10 1000 486 75 120
 EOF
 	exit 2
 }
 
-[[ $# -eq 4 ]] || usage
+[[ $# -eq 5 ]] || usage
 
 currentHoleNumber="$1"
-initialX="$2"
-initialY="$3"
-frames_upperlimit="$4"
+startingFrame="$2"
+initialX="$3"
+initialY="$4"
+frames_upperlimit="$5"
 
 is_uint() {
 	[[ "$1" =~ ^[0-9]+$ ]]
 }
 
 is_uint "$currentHoleNumber" || { echo "currentHoleNumber must be an integer." >&2; exit 2; }
+is_uint "$startingFrame" || { echo "startingFrame must be an integer." >&2; exit 2; }
 is_uint "$initialX" || { echo "initialX must be an integer." >&2; exit 2; }
 is_uint "$initialY" || { echo "initialY must be an integer." >&2; exit 2; }
 is_uint "$frames_upperlimit" || { echo "frames_upperlimit must be an integer." >&2; exit 2; }
 
 (( currentHoleNumber >= 1 && currentHoleNumber <= 18 )) || {
 	echo "currentHoleNumber must be 1..18." >&2
+	exit 2
+}
+(( startingFrame >= 0 && startingFrame <= 2147483647 )) || {
+	echo "startingFrame must be 0..2147483647." >&2
 	exit 2
 }
 (( initialX >= 0 && initialX <= 2560 )) || {
@@ -71,8 +77,6 @@ START_HOLE=$((currentHoleNumber - 1))
 NEXT_HOLE="$currentHoleNumber"
 
 HOLE_ADDRESS=0x023DB7B8
-FIRST_COURSE_READY_FRAME=793
-COURSE_TRANSITION_DELAY=49
 START_AXIS_X=1280
 START_AXIS_Y=1024
 PROGRESS_INTERVAL=250
@@ -109,132 +113,20 @@ if [[ -n "$old_pids" ]]; then
 	fi
 fi
 
-last_input_frame="$(
-	python3 - "$PROJECT" <<'PY'
-from pathlib import Path
-import re
-import sys
-
-data = Path(sys.argv[1]).read_bytes()
-matches = re.findall(rb'"LastInputFrame"\s*:\s*"?([0-9]+)"?', data)
-if not matches:
-	raise SystemExit("Could not find LastInputFrame in the Chimera project")
-print(max(int(x) for x in matches))
-PY
-)"
-
-(( last_input_frame >= FIRST_COURSE_READY_FRAME )) || {
-	echo "Unexpected LastInputFrame: $last_input_frame" >&2
-	exit 1
-}
-
 tmpdir="$(mktemp -d -t minigolf-global-state.XXXXXX)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-DISCOVERY_LOG="$tmpdir/state-discovery.log"
-
-hole_at_frame() {
-	local frame="$1"
-	local ram="$tmpdir/frame-${frame}.ram"
-
-	rm -f "$ram"
-
-	echo "  probing frame $frame ..." >&2
-	if ! "$CHRUN" \
-		--project "$PROJECT" \
-		"$HYBPKG" \
-		--allow-core-mismatch \
-		--files "$HOME" \
-		--frames "$frame" \
-		--dump "Physical RAM=$ram" \
-		>>"$DISCOVERY_LOG" 2>&1
-	then
-		echo "chimera-run failed while probing frame $frame." >&2
-		echo "Probe log: $DISCOVERY_LOG" >&2
-		return 1
-	fi
-
-	python3 - "$ram" "$HOLE_ADDRESS" <<'PY'
-from pathlib import Path
-import sys
-
-p = Path(sys.argv[1])
-address = int(sys.argv[2], 0)
-data = p.read_bytes()
-if address >= len(data):
-	raise SystemExit(
-		f"Physical RAM dump is only {len(data)} bytes; "
-		f"cannot read 0x{address:08X}"
-	)
-print(data[address])
-PY
-
-	rm -f "$ram"
-}
+state_frame="$startingFrame"
 
 echo
 echo "=== Preparing Course $currentHoleNumber exhaustive search ==="
-echo "Cursor      : $initialX,$initialY"
-echo "Upper limit : $frames_upperlimit frames"
-echo "Hole byte   : $START_HOLE -> $NEXT_HOLE"
+echo "Starting frame : $startingFrame"
+echo "Cursor         : $initialX,$initialY"
+echo "Upper limit    : $frames_upperlimit frames"
+echo "Hole byte      : $START_HOLE -> $NEXT_HOLE"
 echo
 
-if (( currentHoleNumber == 1 )); then
-	state_frame="$FIRST_COURSE_READY_FRAME"
-	echo "Course 1 uses the known first-course ready frame: $state_frame"
-else
-	echo "Locating the Course $currentHoleNumber start frame automatically..."
-
-	lo="$FIRST_COURSE_READY_FRAME"
-	lo_value="$(hole_at_frame "$lo")"
-
-	if (( lo_value >= START_HOLE )); then
-		echo "Unexpected hole byte $lo_value at frame $lo; expected < $START_HOLE." >&2
-		exit 1
-	fi
-
-	hi="$last_input_frame"
-	hi_value="$(hole_at_frame "$hi")"
-
-	if (( hi_value < START_HOLE )); then
-		echo "The project never reaches hole byte $START_HOLE by LastInputFrame=$hi." >&2
-		echo "This script expects a complete playthrough." >&2
-		exit 1
-	fi
-
-	while (( lo + 1 < hi )); do
-		mid=$(((lo + hi) / 2))
-		value="$(hole_at_frame "$mid")"
-
-		if (( value >= START_HOLE )); then
-			hi="$mid"
-		else
-			lo="$mid"
-		fi
-	done
-
-	transition_frame="$hi"
-	transition_value="$(hole_at_frame "$transition_frame")"
-
-	if (( transition_value != START_HOLE )); then
-		echo "Expected hole byte $START_HOLE at transition frame $transition_frame," >&2
-		echo "but read $transition_value. The hole byte may no longer be monotonic." >&2
-		exit 1
-	fi
-
-	state_frame=$((transition_frame + COURSE_TRANSITION_DELAY))
-
-	echo "Previous course completed : frame $transition_frame"
-	echo "Course ready              : frame $state_frame"
-fi
-
-if (( state_frame > last_input_frame + 1 )); then
-	echo "Derived state frame $state_frame is beyond LastInputFrame=$last_input_frame." >&2
-	exit 1
-fi
-
-echo
-echo "Creating state: $STATE"
+echo "Creating state at frame $state_frame: $STATE"
 rm -f "$STATE"
 
 "$CHRUN" \
@@ -276,6 +168,7 @@ PY
 
 if (( state_hole != START_HOLE )); then
 	echo "State verification failed: expected hole byte $START_HOLE, got $state_hole." >&2
+	echo "The supplied startingFrame ($startingFrame) may not be on Course $currentHoleNumber." >&2
 	exit 1
 fi
 
@@ -315,7 +208,7 @@ PY
 
 python3 - \
 	"$RUN_CONFIG" \
-	"$currentHoleNumber" "$initialX" "$initialY" "$frames_upperlimit" \
+	"$currentHoleNumber" "$startingFrame" "$initialX" "$initialY" "$frames_upperlimit" \
 	"$state_frame" "$START_HOLE" "$NEXT_HOLE" "$WORKERS" \
 	"$STATE" "$PROJECT" "$HYBPKG" "$CHRUN" <<'PY'
 import json
@@ -324,13 +217,14 @@ from pathlib import Path
 
 (
 	out,
-	hole, x, y, limit,
+	hole, starting_frame, x, y, limit,
 	state_frame, start_hole, next_hole, workers,
 	state, project, core, chimera_run,
 ) = sys.argv[1:]
 
 payload = {
 	"currentHoleNumber": int(hole),
+	"startingFrame": int(starting_frame),
 	"initialX": int(x),
 	"initialY": int(y),
 	"frames_upperlimit": int(limit),

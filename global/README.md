@@ -193,17 +193,10 @@ git checkout 42c7f7fd0df71f7727f5139be06a3fe948660578
 git submodule update --init --recursive
 ```
 
-The nested DOSBox-X checkout should be:
-
-```text
-784240ad6d9cf3ae3f02fab819e2ed5cf5117dd4
-tag: dosbox-x-v2026.08.02
-```
-
 Apply the hybrid patch:
 
 ```
-git apply /path/to/global/patches/dosbox-x-hybrid-core.patch
+git apply ~/src/minigolf-am-pc-tas-optimizers/global/patches/dosbox-x-hybrid-core.patch
 ```
 
 Configure the Waterbox guest build:

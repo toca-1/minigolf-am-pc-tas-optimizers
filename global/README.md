@@ -233,10 +233,15 @@ cp ~/src/chimera/build/Cores/dosbox-x.chimeraCore \
 
 ## 4. Copy install.hdd
 
-If your install.hdd is located at, say, `C:\PATH\install.hdd`, then copy the "PATH" part and replace it in the following command:
+If your install.hdd is located at, say, `C:\PATH\SUBPATH\install.hdd`, then the command to get it into your Ubuntu VM is
 ```
-cp "/mnt/c/PATH/install.hdd" ~/install.hdd
+cp "/mnt/c/PATH/SUBPATH/install.hdd" ~/install.hdd
 ```
+(note how the \ become /). If the .hdd file is not on C: but another drive (X:), change the command to
+```
+cp "/mnt/x/PATH/install.hdd" ~/install.hdd
+```
+
 Then check it with `sha1sum ~/install.hdd`; the correct SHA1 is b63a81c7ef613fb42e725e625ebe0eae18e91119
 
 ## 5. Make the launcher executable

@@ -270,7 +270,7 @@ A search needs:
 
 Beware that Search states must be created using the **same** `core.wbx` build that will later load them (else you'll run into a "ELF hash mismatch"). See `scripts/run_global_search.sh` for the full worker launcher, and `monitor_global_search.py` for a monitor of the search once it is running. They should be executed in the terminal via
 ```
-./run_global_search.sh currentHoleNumber initialX initialY frames_upperlimit
+./run_global_search.sh currentHoleNumber startingFrame initialX initialY frames_upperlimit
 python3 monitor_global_search.py currentHoleNumber initialX initialY frames_upperlimit
 ```
 e.g., 

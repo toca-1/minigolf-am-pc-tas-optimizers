@@ -69,11 +69,11 @@ Booting directly with `dynamic_x86` did not reliably reproduce the same machine 
 4. use an otherwise unused input (Player 2 Joystick Button 2) as an out-of-band request to switch the running CPU core to `dynamic_x86`
 5. run the candidate using the faster dynamic core
 
-## Building
+# Building
 
 The following setup was used during clean-room validation.
 
-### 1. Build patched Chimera
+## 1. Build patched Chimera
 
 ```bash
 git clone https://github.com/ToolAssisted-run/chimera.git
@@ -102,7 +102,7 @@ meson compile \
   zstd
 ```
 
-### 2. Build the miniBox C++ guest toolchain
+## 2. Build the miniBox C++ guest toolchain
 
 ```bash
 git clone https://github.com/ToolAssisted-run/chimera-common-minibox.git
@@ -137,7 +137,7 @@ ninja \
   source/guest/emulibc.c.o
 ```
 
-### 3. Build the hybrid DOSBox-X core
+## 3. Build the hybrid DOSBox-X core
 
 ```bash
 git clone https://github.com/ToolAssisted-run/chimera-core-dosbox-x.git
@@ -182,7 +182,7 @@ Package the core:
   -r /path/to/chimera
 ```
 
-## Running an exhaustive search
+# Running an exhaustive search
 
 A search needs:
 

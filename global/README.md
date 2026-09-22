@@ -218,8 +218,8 @@ Package the core:
 
 ```
 ./waterbox/build-package.sh \
-  -m /path/to/chimera-common-minibox \
-  -r /path/to/chimera
+  -m ~/src/chimera/chimera-common-minibox \
+  -r ~/src/chimera
 ```
 
 # Running an exhaustive search

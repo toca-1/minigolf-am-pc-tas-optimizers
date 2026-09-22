@@ -13,8 +13,8 @@ global/
 ├── project/
 │   └── minigolf.chimeraProject
 ├── scripts/
-│   ├── run_global_search.sh
-│   └── monitor_global_search.py
+    ├── run_global_search.sh
+    └── monitor_global_search.py
 ```
 
 ### `patches/`

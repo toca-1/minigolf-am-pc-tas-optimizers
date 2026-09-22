@@ -15,8 +15,6 @@ global/
 ├── scripts/
 │   ├── run_global_search.sh
 │   └── monitor_global_search.py
-├── source/
-│   └── minigolf_scan_impl.h
 └── reference/
     ├── VERSIONS.txt
     ├── VALIDATION.txt

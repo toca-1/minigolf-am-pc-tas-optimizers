@@ -71,7 +71,20 @@ Booting directly with `dynamic_x86` did not reliably reproduce the same machine 
 
 # Building
 
-The following setup was used during clean-room validation.
+## 0. Set up Ubuntu 26.04
+
+The following is confirmed to work on Ubuntu 26.04 so, unless that is your system already, I recommend to install it or, if you have a Windows 11 machine, install it as a virtual machine through WSL:
+
+1. Open PowerShell as Administrator
+2. Run the commands
+```
+wsl --update
+wsl ---list --online
+wsl --install -d Ubuntu-26.04
+```
+3. Afterwards, restart your PC
+
+# TO DO
 
 ## 1. Build patched Chimera
 

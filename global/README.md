@@ -160,7 +160,7 @@ git checkout 427f6ed7972867638891d7ceb0e81ed9e9ab7db4
 Apply:
 
 ```
-git apply /path/to/global/patches/minibox-gcc15-build-fix.patch
+git apply ~/src/minigolf-am-pc-tas-optimizers/global/patches/minibox-gcc15-build-fix.patch
 ```
 
 Configure the C++ guest build:

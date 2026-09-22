@@ -5,9 +5,6 @@ usage() {
 	cat >&2 <<'EOF'
 Usage:
   ./run_global_search.sh currentHoleNumber startingFrame initialX initialY frames_upperlimit
-
-Example:
-  ./run_global_search.sh 10 1000 486 75 120
 EOF
 	exit 2
 }

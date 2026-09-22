@@ -254,34 +254,27 @@ chmod +x run_global_search.sh
 
 # Running an exhaustive search
 
-
-
-A search needs:
-
-- the patched `chimera-run`
-- the rebuilt hybrid DOSBox-X package
-- `minigolf.chimeraProject`
-- the matching Minigolf HDD
-- a compatible state immediately before the shot
-- the current cursor coordinates
-- the starting mouse-axis carrier values
-- the current and next course-byte values
-- a maximum frame cutoff
-
-Beware that Search states must be created using the **same** `core.wbx` build that will later load them (else you'll run into a "ELF hash mismatch"). See `scripts/run_global_search.sh` for the full worker launcher, and `monitor_global_search.py` for a monitor of the search once it is running. They should be executed in the terminal via
+Start the search is done with the following syntax: 
 ```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 ./run_global_search.sh currentHoleNumber startingFrame initialX initialY frames_upperlimit
-python3 monitor_global_search.py currentHoleNumber initialX initialY frames_upperlimit
 ```
 e.g., 
 ```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 ./run_global_search.sh 10 1997 1000 486 75
-python3 monitor_global_search.py 10 1000 486 75
 ```
 to brute-force hole 10 if it starts on frame 1000 with initial mouse coordinates X=486, Y=75. One other thing to note about the search is that workers share a memory-mapped incumbent file, so when one worker finds a faster result, the other workers can immediately adopt the lower frame cutoff.
 
-## Monitoring
+To monitor the progress of the search, open another PowerShell window and go into the VM (`wsl -d Ubuntu-26.04`). The monitor is started with the following syntax:
+```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
+python3 monitor_global_search.py currentHoleNumber initialX initialY frames_upperlimit
+```
+e.g.,
+```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
+python3 monitor_global_search.py 10 1000 486 75
+```
 
-`monitor_global_search.py` reads worker logs incrementally and reports information such as number of candidates evaluated, current best score, and others
-
-<img width="789" height="327" alt="image" src="https://github.com/user-attachments/assets/504cf44f-82b2-4e05-a2c3-fb93c55e0ba1" />
+<img width="783" height="301" alt="image" src="https://github.com/user-attachments/assets/7f090e4a-eccf-42f0-813e-26c0c5898caa" />

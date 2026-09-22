@@ -109,7 +109,8 @@ sudo apt install -y \
   xz-utils \
   patch \
   pkg-config \
-  ca-certificates
+  ca-certificates \
+  libegl-dev
 ```
 9. Clone this repository:
 ```

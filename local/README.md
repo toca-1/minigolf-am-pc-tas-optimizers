@@ -14,9 +14,9 @@ For a more detailed explanation of the input model and the development of both o
 
 ## Usage
 
-Create a TAStudio branch on the first frame of the shot, enable recording mode, and run this Lua script via Tools > Lua Console. Enter the branch number into the "Branch" field. Next, obtain the current coordinates of the guest mouse via View > Display Input (for the input to appear, Recording Mode has to be active in TAStudio). Then configure the search in the script window and click "Start local search". The following variables can be set:
+Create a TAStudio branch on the first frame of the shot, enable recording mode, and run this Lua script via Tools > Lua Console. Enter the branch number into the "TAStudio Branch" field. Next, obtain the current coordinates of the guest mouse via View > Display Input (for the input to appear, Recording Mode has to be active in TAStudio). Then configure the search in the script window and click "Start local search". Aside from the cursor coordinates, the following variables can be set:
 
-### Radius and step
+### Radius and Step
 
 Radius controls the size of the circle, i.e., the search neighborhood around the chosen initial coordinate. Step controls the spacing between tested coordinates: a smaller step gives a denser search but requires more tests; from my testing I found a step-size of 4 to be the biggest possible value without skipping any shots.
 
@@ -30,9 +30,9 @@ Adds a small movement on the button-down frame which is necessary for the shot t
 
 ### Keep best input
 
-When enabled, the best shot found is written back into TAStudio when the search finishes.
+When checked, the best shot found is written back into TAStudio when the search finishes.
 
-### Search modes
+### Objective
 
 The script offers two search modes:
 

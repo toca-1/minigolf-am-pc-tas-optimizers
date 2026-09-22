@@ -6,8 +6,6 @@ A TAStudio Lua script for locally optimizing shots in **Minigolf am PC** running
 
 For a more detailed explanation of the input model and the development of both optimizers, see the corresponding toolassisted.run forum post [here](https://forum.toolassisted.run/t/minigolf-am-pc-pc-minigolf-am-pc/1540/2)
 
-# TO DO: LINK
-
 ## Requirements
 
 - Mouse Relative Sensitivity = 1.0

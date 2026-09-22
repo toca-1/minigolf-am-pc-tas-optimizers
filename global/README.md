@@ -15,10 +15,6 @@ global/
 ├── scripts/
 │   ├── run_global_search.sh
 │   └── monitor_global_search.py
-└── reference/
-    ├── VERSIONS.txt
-    ├── VALIDATION.txt
-    └── PUBLIC-FILES-SHA256.txt
 ```
 
 ### `patches/`

@@ -31,12 +31,7 @@ global/
 
 ### `scripts/`
 
-The scripts wrap state generation, worker launching, monitoring, and result collection.
-
-### `source/`
-
-- `minigolf_scan_impl.h` contains the mouse-plan generation and deduplication logic used by the scanner. 
-- `patches/chimera-global-scanner.patch` is the authoritative patch to apply to Chimera
+The scripts wrap state generation, worker launching, monitoring, and result collection, cf. below
 
 ## Tested source revisions
 

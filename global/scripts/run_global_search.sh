@@ -249,7 +249,7 @@ echo "CPUs        : ${CPUS[*]}"
 echo "Output      : $OUT"
 echo
 echo "Monitor in another terminal with:"
-echo "  python3 monitor_global_search.py $currentHoleNumber $initialX $initialY $frames_upperlimit"
+echo "  python3 monitor_global_search.py $currentHoleNumber $frames_upperlimit"
 echo
 
 START="$(date +%s)"

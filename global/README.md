@@ -246,7 +246,11 @@ Then check it with `sha1sum ~/install.hdd`; the correct SHA1 is b63a81c7ef613fb4
 
 ## 5. Make the launcher executable
 
-...
+```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
+
+chmod +x run_global_search.sh
+```
 
 # Running an exhaustive search
 

@@ -269,12 +269,12 @@ to brute-force hole 10 if it starts on frame 1000 with initial mouse coordinates
 To monitor the progress of the search, open another PowerShell window and go into the VM (`wsl -d Ubuntu-26.04`). The monitor is started with the following syntax:
 ```
 cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
-python3 monitor_global_search.py currentHoleNumber initialX initialY frames_upperlimit
+python3 monitor_global_search.py currentHoleNumber frames_upperlimit
 ```
 e.g.,
 ```
 cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
-python3 monitor_global_search.py 10 1000 486 75
+python3 monitor_global_search.py 10 75
 ```
 
 <img width="783" height="301" alt="image" src="https://github.com/user-attachments/assets/7f090e4a-eccf-42f0-813e-26c0c5898caa" />

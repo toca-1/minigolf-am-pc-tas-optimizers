@@ -284,7 +284,7 @@ def finished_info() -> dict | None:
 
 
 def clear_screen() -> None:
-	print("\033[2J\033[H", end="")
+	print("\033[H\033[2J", end="", flush=True)
 
 
 def render() -> bool:

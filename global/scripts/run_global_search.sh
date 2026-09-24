@@ -5,9 +5,6 @@ usage() {
 	cat >&2 <<'EOF'
 Usage:
   ./run_global_search.sh currentHoleNumber startingFrame initialX initialY frames_upperlimit
-
-Example:
-  ./run_global_search.sh 10 1000 486 75 120
 EOF
 	exit 2
 }
@@ -101,24 +98,78 @@ PROGRESS_INTERVAL=250
 	exit 1
 }
 
+command -v setsid >/dev/null 2>&1 || {
+	echo "setsid is required but was not found." >&2
+	exit 1
+}
+
 mkdir -p "$STATE_DIR"
 
-old_pids="$(pgrep -f -- "$CHRUN" || true)"
-if [[ -n "$old_pids" ]]; then
-	echo "Stopping previous chimera-run process(es): $old_pids"
-	kill $old_pids 2>/dev/null || true
-	sleep 1
-
-	old_pids="$(pgrep -f -- "$CHRUN" || true)"
-	if [[ -n "$old_pids" ]]; then
-		echo "Force-stopping remaining process(es): $old_pids"
-		kill -KILL $old_pids 2>/dev/null || true
-		sleep 1
-	fi
-fi
-
 tmpdir="$(mktemp -d -t minigolf-global-state.XXXXXX)"
-trap 'rm -rf "$tmpdir"' EXIT
+
+active_pgids=()
+
+remove_active_pgid() {
+	local target="$1"
+	local remaining=()
+	local pgid
+
+	for pgid in "${active_pgids[@]}"; do
+		if [[ "$pgid" != "$target" ]]; then
+			remaining+=("$pgid")
+		fi
+	done
+
+	active_pgids=("${remaining[@]}")
+}
+
+cleanup() {
+	local rc=$?
+
+	trap - EXIT INT TERM
+	set +e
+
+	if (( ${#active_pgids[@]} > 0 )); then
+		echo
+		echo "Stopping active chimera-run process group(s)..."
+
+		for pgid in "${active_pgids[@]}"; do
+			if kill -0 -- "-$pgid" 2>/dev/null; then
+				echo "  stopping process group $pgid"
+				kill -TERM -- "-$pgid" 2>/dev/null
+			fi
+		done
+
+		for _ in {1..10}; do
+			any_alive=0
+
+			for pgid in "${active_pgids[@]}"; do
+				if kill -0 -- "-$pgid" 2>/dev/null; then
+					any_alive=1
+					break
+				fi
+			done
+
+			(( any_alive == 0 )) && break
+			sleep 0.1
+		done
+
+		for pgid in "${active_pgids[@]}"; do
+			if kill -0 -- "-$pgid" 2>/dev/null; then
+				echo "  force-stopping process group $pgid"
+				kill -KILL -- "-$pgid" 2>/dev/null
+			fi
+		done
+	fi
+
+	rm -rf -- "$tmpdir"
+
+	exit "$rc"
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 state_frame="$startingFrame"
 
@@ -133,21 +184,27 @@ echo
 echo "Creating state at frame $state_frame: $STATE"
 rm -f "$STATE"
 
-"$CHRUN" \
+setsid "$CHRUN" \
 	--project "$PROJECT" \
 	"$HYBPKG" \
 	--allow-core-mismatch \
 	--files "$HOME" \
 	--frames "$state_frame" \
-	--final-state "$STATE"
+	--final-state "$STATE" &
+
+state_pgid=$!
+active_pgids+=("$state_pgid")
+
+wait "$state_pgid"
+remove_active_pgid "$state_pgid"
 
 [[ -s "$STATE" ]] || {
 	echo "State was not created: $STATE" >&2
 	exit 1
 }
-
 verify_ram="$tmpdir/verify.ram"
-"$CHRUN" \
+
+setsid "$CHRUN" \
 	--project "$PROJECT" \
 	"$HYBPKG" \
 	--allow-core-mismatch \
@@ -155,7 +212,13 @@ verify_ram="$tmpdir/verify.ram"
 	--state "$STATE" \
 	--frames 0 \
 	--dump "Physical RAM=$verify_ram" \
-	>/dev/null 2>&1
+	>/dev/null 2>&1 &
+
+verify_pgid=$!
+active_pgids+=("$verify_pgid")
+
+wait "$verify_pgid"
+remove_active_pgid "$verify_pgid"
 
 state_hole="$(
 	python3 - "$verify_ram" "$HOLE_ADDRESS" <<'PY'
@@ -197,7 +260,15 @@ fi
 
 WORKERS="${#CPUS[@]}"
 
-rm -rf "$OUT"
+if [[ -e "$OUT" ]]; then
+	backup="${OUT}.previous.$(date +'%Y%m%d-%H%M%S')"
+	echo
+	echo "Preserving previous output:"
+	echo "  $OUT"
+	echo "  -> $backup"
+	mv -- "$OUT" "$backup"
+fi
+
 mkdir -p "$OUT"
 
 python3 - "$SHARED" "$frames_upperlimit" <<'PY'
@@ -256,7 +327,7 @@ echo "CPUs        : ${CPUS[*]}"
 echo "Output      : $OUT"
 echo
 echo "Monitor in another terminal with:"
-echo "  python3 monitor_global_search.py $currentHoleNumber $initialX $initialY $frames_upperlimit"
+echo "  python3 monitor_global_search.py $currentHoleNumber $frames_upperlimit"
 echo
 
 START="$(date +%s)"
@@ -266,9 +337,9 @@ for ((w = 0; w < WORKERS; w++)); do
 	cpu="${CPUS[$w]}"
 	echo "worker $w -> CPU $cpu"
 
-	/usr/bin/time \
+	setsid /usr/bin/time \
 		-o "$OUT/worker-$w.time" \
-		-f 'REAL=%e USER=%U SYS=%S' \
+		-f 'REAL=%e USER=%U SYS=%S EXIT=%x' \
 		taskset -c "$cpu" \
 		env \
 		MINIGOLF_SCAN=1 \
@@ -282,7 +353,7 @@ for ((w = 0; w < WORKERS; w++)); do
 		MINIGOLF_SCAN_START_AXIS_Y="$START_AXIS_Y" \
 		MINIGOLF_SCAN_START_HOLE="$START_HOLE" \
 		MINIGOLF_SCAN_NEXT_HOLE="$NEXT_HOLE" \
-		MINIGOLF_SCAN_ORDER=bottom-up \
+		MINIGOLF_SCAN_ORDER=native \
 		MINIGOLF_SCAN_SHARED_BEST_FILE="$SHARED" \
 		MINIGOLF_SWITCH_DYNAMIC=1 \
 		"$CHRUN" \
@@ -294,13 +365,28 @@ for ((w = 0; w < WORKERS; w++)); do
 		--frames 0 \
 		>"$OUT/worker-$w.log" 2>&1 &
 
-	pids+=("$!")
+	pid=$!
+	pids+=("$pid")
+	active_pgids+=("$pid")
 done
 
 rc=0
-for pid in "${pids[@]}"; do
-	if ! wait "$pid"; then
+for w in "${!pids[@]}"; do
+	pid="${pids[$w]}"
+
+	if wait "$pid"; then
+		status=0
+	else
+		status=$?
 		rc=1
+	fi
+
+	remove_active_pgid "$pid"
+
+	printf 'worker %d exit=%d\n' "$w" "$status"
+
+	if (( status != 0 )); then
+		echo "  log: $OUT/worker-$w.log"
 	fi
 done
 
@@ -323,7 +409,7 @@ Path(sys.argv[1]).write_text(
 PY
 
 echo
-echo "All workers finished."
+echo "All workers exited."
 echo "exit status  : $rc"
 echo "wall seconds : $((END - START))"
 

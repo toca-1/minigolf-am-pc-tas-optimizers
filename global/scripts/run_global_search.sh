@@ -260,7 +260,15 @@ fi
 
 WORKERS="${#CPUS[@]}"
 
-rm -rf "$OUT"
+if [[ -e "$OUT" ]]; then
+	backup="${OUT}.previous.$(date +'%Y%m%d-%H%M%S')"
+	echo
+	echo "Preserving previous output:"
+	echo "  $OUT"
+	echo "  -> $backup"
+	mv -- "$OUT" "$backup"
+fi
+
 mkdir -p "$OUT"
 
 python3 - "$SHARED" "$frames_upperlimit" <<'PY'
@@ -331,7 +339,7 @@ for ((w = 0; w < WORKERS; w++)); do
 
 	setsid /usr/bin/time \
 		-o "$OUT/worker-$w.time" \
-		-f 'REAL=%e USER=%U SYS=%S' \
+		-f 'REAL=%e USER=%U SYS=%S EXIT=%x' \
 		taskset -c "$cpu" \
 		env \
 		MINIGOLF_SCAN=1 \
@@ -345,7 +353,7 @@ for ((w = 0; w < WORKERS; w++)); do
 		MINIGOLF_SCAN_START_AXIS_Y="$START_AXIS_Y" \
 		MINIGOLF_SCAN_START_HOLE="$START_HOLE" \
 		MINIGOLF_SCAN_NEXT_HOLE="$NEXT_HOLE" \
-		MINIGOLF_SCAN_ORDER=bottom-up \
+		MINIGOLF_SCAN_ORDER=native \
 		MINIGOLF_SCAN_SHARED_BEST_FILE="$SHARED" \
 		MINIGOLF_SWITCH_DYNAMIC=1 \
 		"$CHRUN" \
@@ -363,12 +371,23 @@ for ((w = 0; w < WORKERS; w++)); do
 done
 
 rc=0
-for pid in "${pids[@]}"; do
-	if ! wait "$pid"; then
+for w in "${!pids[@]}"; do
+	pid="${pids[$w]}"
+
+	if wait "$pid"; then
+		status=0
+	else
+		status=$?
 		rc=1
 	fi
 
 	remove_active_pgid "$pid"
+
+	printf 'worker %d exit=%d\n' "$w" "$status"
+
+	if (( status != 0 )); then
+		echo "  log: $OUT/worker-$w.log"
+	fi
 done
 
 END="$(date +%s)"
@@ -390,7 +409,7 @@ Path(sys.argv[1]).write_text(
 PY
 
 echo
-echo "All workers finished."
+echo "All workers exited."
 echo "exit status  : $rc"
 echo "wall seconds : $((END - START))"
 

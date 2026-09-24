@@ -41,3 +41,10 @@ The script offers two search modes:
 
 - *First improvement (abort circle)*: As soon as a faster solution is found, the rest of the current search circle is skipped and the optimizer immediately recenters on that new fastest result.
 - *Best improvement (finish circle)*: The optimizer finishes the entire current circle and then recenters on the fastest improvement found there. This requires more work per iteration but bases each recentering decision on the complete current neighborhood. Already-tested coordinates are cached and skipped when later neighborhoods overlap.
+
+## Tips & tricks
+Ways to speed up the script:
+- Unthrottle the clock for maximum emulation speed (*Config > Speed/Skip > Unthrottled*)
+- Minimizing TAStudio while the search is running gives a massive speed boost. If you have to keep TAStudio open for your search, you can still greatly speed up the search by **scrolling up or down** in TAStudio until none of the testing frames visible anymore (reduces visual updating)
+- Click on any window that is not Bizhawk, or on the desktop. Not having Bizhawk in focus for some reason speeds things it up by ~15%, at least on my machine
+- Turn off the sound when the emulator is fast forwarding: *Config > Sound*, and make sure that "Mute Frame Advance" is checked. Also, above "RW & FF" you may uncheck the "Ena." checkbox

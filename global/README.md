@@ -258,3 +258,11 @@ python3 monitor_global_search.py 10 75
 ```
 
 <img width="783" height="301" alt="image" src="https://github.com/user-attachments/assets/7f090e4a-eccf-42f0-813e-26c0c5898caa" />
+
+# Running a restricted exhaustive search
+
+The script includes a possibility of searching a smaller window via
+```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
+MINIGOLF_SCAN_X_MIN=X1 MINIGOLF_SCAN_X_MAX=X2 MINIGOLF_SCAN_Y_MIN=Y1 MINIGOLF_SCAN_Y_MAX=Y2 ./run_global_search.sh currentHoleNumber startingFrame initialX initialY frames_upperlimit
+```

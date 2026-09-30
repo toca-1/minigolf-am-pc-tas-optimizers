@@ -34,7 +34,7 @@ When checked, the best shot found is written back into TAStudio when the search 
 
 The script offers two search modes:
 
-- *Optimize existing hole-in-one*: Start from a known solution and search nearby coordinates for a faster one
+- *Optimize existing hole-in-one*: Start from a known solution and search nearby coordinates for a faster one. To be clear: the shot/known solution has to be written at the start of the chosen branch, else the script exits with an error.
 - *Find a hole-in-one*: search around a chosen coordinate even if the current shot is a miss or part of a multi-shot solution
 
 ### Recenter strategies

@@ -1,5 +1,5 @@
 diff --git a/source/engine/tools/chimera-run.cpp b/source/engine/tools/chimera-run.cpp
-index 221a87b..95f473f 100644
+index 221a87b..e9bcc69 100644
 --- a/source/engine/tools/chimera-run.cpp
 +++ b/source/engine/tools/chimera-run.cpp
 @@ -1,3 +1,8 @@
@@ -11,7 +11,7 @@ index 221a87b..95f473f 100644
  /* chimera-run - the engine's headless runner.
   *
   * Loads a core package, a rom, and a movie input log; runs the movie; dumps
-@@ -744,6 +749,1136 @@ int main(int argc, char **argv)
+@@ -744,6 +749,1284 @@ int main(int argc, char **argv)
  		fprintf(stderr, "state file tag: %.*s\n", (int)(tagLen < sizeof tag ? tagLen : sizeof tag), (const char *)tag);
  	}
  
@@ -161,6 +161,17 @@ index 221a87b..95f473f 100644
 +				"MINIGOLF_SCAN_NEXT_HOLE",
 +				scanStartHole + 1);
 +
++		const char *landingText =
++			std::getenv(
++				"MINIGOLF_SCAN_LANDINGS");
++
++		const bool captureLandings =
++			landingText
++			&& landingText[0] != '\0'
++			&& std::strcmp(
++				landingText,
++				"0") != 0;
++
 +		const char *scanOrderText =
 +			std::getenv(
 +				"MINIGOLF_SCAN_ORDER");
@@ -245,6 +256,15 @@ index 221a87b..95f473f 100644
 +		constexpr int64_t
 +			HOLE_ADDRESS = 0x023DB7B8;
 +
++		constexpr int64_t
++			BALL_PLAYABLE_ADDRESS = 0x00069DF4C;
++
++		constexpr int64_t
++			BALL_X_ADDRESS = 0x023DB7A4;
++
++		constexpr int64_t
++			BALL_Y_ADDRESS = 0x023DB7A6;
++
 +		const uint8_t START_HOLE =
 +			static_cast<uint8_t>(
 +				scanStartHole);
@@ -310,6 +330,23 @@ index 221a87b..95f473f 100644
 +			reinterpret_cast<const uint8_t *>(
 +				static_cast<uintptr_t>(
 +					ramPtrValue));
++
++		auto readU16 =
++			[&](int64_t address) -> uint16_t
++		{
++			return static_cast<uint16_t>(
++				static_cast<uint16_t>(ram[address])
++				| (static_cast<uint16_t>(ram[address + 1]) << 8));
++		};
++
++		auto readU32 =
++			[&](int64_t address) -> uint32_t
++		{
++			return static_cast<uint32_t>(ram[address])
++				| (static_cast<uint32_t>(ram[address + 1]) << 8)
++				| (static_cast<uint32_t>(ram[address + 2]) << 16)
++				| (static_cast<uint32_t>(ram[address + 3]) << 24);
++		};
 +
 +		/*
 +		 * Locate controls by name.
@@ -727,7 +764,7 @@ index 221a87b..95f473f 100644
 +			 * optimal results are not lost.
 +			 */
 +
-+			if (sharedBest)
++			if (!captureLandings && sharedBest)
 +			{
 +				const int32_t shared =
 +					__atomic_load_n(
@@ -746,11 +783,32 @@ index 221a87b..95f473f 100644
 +			}
 +
 +int64_t cutoff =
-+				bestScore <= maxFrames
-+					? bestScore
-+					: maxFrames;
++				captureLandings
++					? maxFrames
++					: (bestScore <= maxFrames
++						? bestScore
++						: maxFrames);
 +
 +			int64_t score = -1;
++			int64_t readyAfter = -1;
++			uint16_t landingX = 0;
++			uint16_t landingY = 0;
++
++			/*
++			 * "Ball can be played" has an early 0 -> 1 transition
++			 * before the shot actually begins.  The meaningful
++			 * sequence is:
++			 *
++			 *     0 -> 1   pre-shot; ignore
++			 *     1 -> 0   shot has started
++			 *     0 -> 1   shot has finished
++			 *
++			 * A hole-in-one changes course while the value remains
++			 * 0, and is handled separately by the hole-byte check.
++			 */
++			bool previousPlayable =
++				readU32(BALL_PLAYABLE_ADDRESS) != 0;
++			bool shotStarted = false;
 +
 +			for (int64_t n = 0;
 +			     n < cutoff;
@@ -816,6 +874,37 @@ index 221a87b..95f473f 100644
 +					break;
 +				}
 +
++				if (captureLandings && hole == START_HOLE)
++				{
++					const bool playable =
++						readU32(
++							BALL_PLAYABLE_ADDRESS) != 0;
++
++					if (!shotStarted)
++					{
++						/*
++						 * The first 0 -> 1 is only the pre-shot
++						 * transition.  Arm landing detection only
++						 * after the subsequent 1 -> 0 transition.
++						 */
++						if (previousPlayable && !playable)
++							shotStarted = true;
++					}
++					else if (!previousPlayable && playable)
++					{
++						/*
++						 * First 0 -> 1 after the shot actually
++						 * started: the shot is over.
++						 */
++						readyAfter = n + 1;
++						landingX = readU16(BALL_X_ADDRESS);
++						landingY = readU16(BALL_Y_ADDRESS);
++						break;
++					}
++
++					previousPlayable = playable;
++				}
++
 +				if (hole != START_HOLE)
 +				{
 +					char buf[256];
@@ -837,6 +926,65 @@ index 221a87b..95f473f 100644
 +			}
 +
 +			evaluated++;
++
++			if (captureLandings)
++			{
++				const char *status =
++					readyAfter >= 0
++						? "ended"
++						: (score >= 0
++							? "hio"
++							: (shotStarted
++								? "timeout"
++								: "no_shot"));
++
++				const int64_t eventAfter =
++					readyAfter >= 0
++						? readyAfter
++						: score;
++
++				const int landingOutX =
++					readyAfter >= 0
++						? static_cast<int>(landingX)
++						: -1;
++
++				const int landingOutY =
++					readyAfter >= 0
++						? static_cast<int>(landingY)
++						: -1;
++
++				std::fprintf(
++					stderr,
++					"LANDING_RESULT "
++					"worker=%lld "
++					"plan=%zu "
++					"raw=%d,%d "
++					"aliases=%u "
++					"x_bounds=%d..%d "
++					"y_bounds=%d..%d "
++					"dx=%+d "
++					"dy=%+d "
++					"input_frames=%zu "
++					"status=%s "
++					"after=%lld "
++					"ball=%d,%d\n",
++					static_cast<long long>(worker),
++					planIndex,
++					u.canonicalX,
++					u.canonicalY,
++					u.aliases,
++					u.minX,
++					u.maxX,
++					u.minY,
++					u.maxY,
++					plan.dx,
++					plan.dy,
++					plan.frames.size(),
++					status,
++					static_cast<long long>(eventAfter),
++					landingOutX,
++					landingOutY);
++			}
 +
 +			if (score >= 0)
 +			{

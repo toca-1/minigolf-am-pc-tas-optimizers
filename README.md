@@ -5,7 +5,7 @@ Local and exhaustive shot optimizers for TASing the 1997 Windows game *Minigolf 
 - [`local/`](local/): an iterative local optimizer implemented as a TAStudio Lua script. It searches around an existing shot and is convenient for quickly improving a known solution
 - [`global/`](global/): a headless exhaustive optimizer which searches all distinct mouse input plans within a configured target area in order to find the fastest one-shot solution (if such a thing exists, of course)
 
-Each directory has its own README with usage, setup, and implementation-specific information. For a detailed explanation of how the optimizers work, cf. the accompanying [toolAssisted.run forum post](https://forum.toolassisted.run/t/minigolf-am-pc-pc-minigolf-am-pc/1540/2).
+Each directory has its own README with usage, setup, and implementation-specific information. For a detailed explanation of how the optimizers work, cf. the accompanying [toolAssisted.run forum post](https://forum.toolassisted.run/t/minigolf-am-pc-pc-minigolf-am-pc/1540/2) as well as the final [run submission notes](https://toolassisted.run/runs/M100095/).
 
 ## AI assistance
 

@@ -2,6 +2,8 @@
 
 This directory contains the exhaustive shot optimizer used for my *Minigolf am PC* TAS. Unlike the [local optimizer](https://github.com/toca-1/minigolf-am-pc-tas-optimizers/tree/main/local), this one does an exhaustive search for **one** shot (i.e., it does **not** exhaust all arbitrary sequences of mouse inputs that could theoretically be entered).
 
+In addition to searching for the fastest hole-in-one, the optimizer can also record and rank the landing state reached by every first shot. This is useful for courses where no hole-in-one exists, so promising first shots can then be continued with the local optimizer.
+
 For a detailed explanation of the input model and the development of both optimizers, see the corresponding toolassisted.run forum post [here](https://forum.toolassisted.run/t/minigolf-am-pc-pc-minigolf-am-pc/1540/2)
 
 ## Directory layout
@@ -16,12 +18,15 @@ global/
 │   └── minigolf.chimeraProject
 └── scripts/
     ├── run_global_search.sh
-    └── monitor_global_search.py
+    ├── monitor_global_search.py
+    ├── run_global_landing_search.sh
+    ├── monitor_global_landing_search.py
+    └── rank_global_results.py
 ```
 
 ### `patches/`
 
-- `chimera-global-scanner.patch` adds the headless exhaustive Minigolf scanner to `chimera-run`
+- `chimera-global-scanner.patch` adds the headless exhaustive Minigolf scanner to `chimera-run`, including both the hole-in-one and landing-state search modes
 - `dosbox-x-hybrid-core.patch` adds a search-only mechanism that switches DOSBox-X from the normal CPU core to `dynamic_x86` at runtime. The machine is booted and the search savestate is created using the normal core; the switch happens after loading the state
 - `minibox-gcc15-build-fix.patch` is a build compatibility fix needed for the miniBox C++ guest toolchain in my Ubuntu 26.04, GCC 15 environment, and *not* part of the search algorithm itself
 
@@ -31,7 +36,7 @@ global/
 
 ### `scripts/`
 
-The scripts wrap state generation, worker launching, monitoring, and result collection, cf. below
+The scripts wrap state generation, worker launching, monitoring, result collection, and landing-state reranking, cf. below
 
 ## Search model
 
@@ -222,22 +227,24 @@ cp "/mnt/x/PATH/install.hdd" ~/install.hdd
 
 Then check it with `sha1sum ~/install.hdd`; the correct SHA1 is b63a81c7ef613fb42e725e625ebe0eae18e91119
 
-## 5. Make the launcher executable
+## 5. Make the launchers executable
 
 ```
 cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 
-chmod +x run_global_search.sh
+chmod +x \
+  run_global_search.sh \
+  run_global_landing_search.sh
 ```
 
-# Running an exhaustive search
+# Running an exhaustive hole-in-one search
 
-Start the search is done with the following syntax: 
+Start the search is done with the following syntax:
 ```
 cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 ./run_global_search.sh currentHoleNumber startingFrame initialX initialY frames_upperlimit
 ```
-e.g., 
+e.g.,
 ```
 cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 ./run_global_search.sh 10 1997 1000 486 75
@@ -255,12 +262,56 @@ cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 python3 monitor_global_search.py 10 75
 ```
 
-<img width="783" height="301" alt="image" src="https://github.com/user-attachments/assets/7f090e4a-eccf-42f0-813e-26c0c5898caa" />
-
 # Running a restricted exhaustive search
 
 The script includes a possibility of searching a smaller window via
 ```
 cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 MINIGOLF_SCAN_X_MIN=X1 MINIGOLF_SCAN_X_MAX=X2 MINIGOLF_SCAN_Y_MIN=Y1 MINIGOLF_SCAN_Y_MAX=Y2 ./run_global_search.sh currentHoleNumber startingFrame initialX initialY frames_upperlimit
+```
+
+# Running an exhaustive landing-state search
+
+The scanner can also be used to exhaustively test every first-shot input plan, record where the ball ends up, and rank the resulting positions by their distance from a chosen target point (e.g., for courses where no hole-in-one exists). The syntax is:
+```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
+./run_global_landing_search.sh currentHoleNumber startingFrame initialX initialY frames_upperlimit targetX targetY
+```
+
+`currentHoleNumber`, `startingFrame`, `initialX`, and `initialY` have the same meaning as for the hole-in-one search. `targetX` and `targetY` are coordinates in the same coordinate system as the ball-position values read from Physical RAM (may be the hole itself or an intermediate point chosen because of the course geometry). These values are used only to rank the recorded landing states and do not affect which input plans are searched. `frames_upperlimit` is the maximum number of frames simulated for each candidate. A candidate whose shot-ending signal has not occurred within that limit is recorded as a timeout and is not included in the ranked landing states.
+
+To monitor the landing-state search, use:
+```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
+python3 monitor_global_landing_search.py currentHoleNumber frames_upperlimit targetX targetY
+```
+e.g.,
+if the search command was
+```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
+./run_global_landing_search.sh 17 3366 624 900 250 530 200
+```
+then the monitor command is
+```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
+python3 monitor_global_landing_search.py 17 250 530 200
+```
+
+The `ended` value shown by the monitor is the frame offset at which the game's shot-state flag returns from 0 to 1 and the final ball position is recorded. A subsequent shot can in practice be entered a few frames before this signal, so `ended` is useful for comparing first shots but is not necessarily the earliest possible frame on which the next shot can be entered.
+
+## Reranking a completed landing-state search
+
+Every completed landing position remains stored as a log. A finished search can therefore be ranked against a different target point without running the emulator search again:
+```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
+python3 rank_global_results.py currentHoleNumber targetX targetY --top 10
+```
+e.g.,
+```
+python3 rank_global_results.py 17 530 200 --top 10
+```
+
+The ranker can also show the distance/time Pareto frontier (useful for finding candidates which land somewhat farther from the target but finish their first shot earlier):
+```
+python3 rank_global_results.py 17 530 200 --pareto --top 30
 ```

@@ -27,9 +27,7 @@ global/
 
 ### `project/`
 
-`minigolf.chimeraProject` is an unoptimized full playthrough that contains the input history used to recreate the search states. Beware that underlying HDD file is intentionally **not included**.
-
-# TODO: link the published TAS submission here for exact HDD construction instructions.
+`minigolf.chimeraProject` is an unoptimized full playthrough that contains the input history used to recreate the search states. Beware that underlying HDD file is intentionally **not included**; instructions on how to build it can be found [here](https://toolassisted.run/runs/M100095/) (under "Reproduction Steps").
 
 ### `scripts/`
 

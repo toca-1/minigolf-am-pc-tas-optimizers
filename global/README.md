@@ -225,7 +225,7 @@ cp "/mnt/c/PATH/SUBPATH/install.hdd" ~/install.hdd
 cp "/mnt/x/PATH/install.hdd" ~/install.hdd
 ```
 
-Then check it with `sha1sum ~/install.hdd`; the correct SHA1 is b63a81c7ef613fb42e725e625ebe0eae18e91119
+Then check it with `sha1sum ~/install.hdd`; the correct SHA1 is f1bb3175f01f2cb4ad52c3dba261da1c3d9415c9
 
 ## 5. Make the launchers executable
 

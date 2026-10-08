@@ -257,7 +257,7 @@ index 221a87b..e9bcc69 100644
 +			HOLE_ADDRESS = 0x023B9A18;
 +
 +		constexpr int64_t
-+			BALL_PLAYABLE_ADDRESS = 0x00069DF4C;
++			BALL_PLAYABLE_ADDRESS = 0x0069DF4C;
 +
 +		constexpr int64_t
 +			BALL_X_ADDRESS = 0x023B9A04;

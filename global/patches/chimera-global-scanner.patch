@@ -254,16 +254,16 @@ index 221a87b..e9bcc69 100644
 +			SEARCH_DYNAMIC_BUTTON = 11;
 +
 +		constexpr int64_t
-+			HOLE_ADDRESS = 0x023DB7B8;
++			HOLE_ADDRESS = 0x023B9A18;
 +
 +		constexpr int64_t
 +			BALL_PLAYABLE_ADDRESS = 0x00069DF4C;
 +
 +		constexpr int64_t
-+			BALL_X_ADDRESS = 0x023DB7A4;
++			BALL_X_ADDRESS = 0x023B9A04;
 +
 +		constexpr int64_t
-+			BALL_Y_ADDRESS = 0x023DB7A6;
++			BALL_Y_ADDRESS = 0x023B9A06;
 +
 +		const uint8_t START_HOLE =
 +			static_cast<uint8_t>(

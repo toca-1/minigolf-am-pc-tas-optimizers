@@ -84,6 +84,7 @@ sudo apt install -y \
   cmake \
   curl \
   python3 \
+  python3-pil \
   perl \
   time \
   procps \

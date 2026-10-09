@@ -21,7 +21,8 @@ global/
     ├── monitor_global_search.py
     ├── run_global_landing_search.sh
     ├── monitor_global_landing_search.py
-    └── rank_global_results.py
+    ├── rank_global_results.py
+    └── plot_global_landings.py
 ```
 
 ### `patches/`
@@ -36,7 +37,7 @@ global/
 
 ### `scripts/`
 
-The scripts wrap state generation, worker launching, monitoring, result collection, and landing-state reranking, cf. below
+The scripts wrap state generation, worker launching, monitoring, result collection, landing-state reranking, and visualization of landing positions, cf. below
 
 ## Search model
 
@@ -299,6 +300,31 @@ python3 monitor_global_landing_search.py 17 250 530 200
 ```
 
 The `ended` value shown by the monitor is the frame offset at which the game's shot-state flag returns from 0 to 1 and the final ball position is recorded. A subsequent shot can in practice be entered a few frames before this signal, so `ended` is useful for comparing first shots but is not necessarily the earliest possible frame on which the next shot can be entered.
+
+## Visualizing landing positions on a course screenshot
+
+`plot_global_landings.py` overlays the final ball positions from an exhaustive landing-state search onto a screenshot of the course (taken by default with F12 while in the emulator). Each distinct landing position is marked with a colored circle. The syntax is:
+```
+cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
+python3 plot_global_landings.py currentHoleNumber /PATH/TP/course-screenshot.png
+```
+e.g., for hole 7, with the screenshot saved in the search output directory as `course7.png`:
+```
+python3 plot_global_landings.py 7 ~/minigolf-hole7-exhaustive/course7.png
+```
+By default, the script reads all `worker-*.log` files in `~/minigolf-hole7*-exhaustive/` and saves the annotated image alongside the screenshot as `ORIGINAL-FILENAME_landings.png`. The first run also extracts the landing coordinates and their occurrence counts into `landing-positions.tsv`, with `landing-positions.meta.json` alongside it, in the search output directory. Later runs reuse this cache instead of rereading the worker logs, unless the logs have changed. To use the cached data even if the logs have changed, add `--cache-only`; to force a fresh extraction, add `--refresh-cache`. The default mapping from RAM coordinates to an uncropped 640×480 game screenshot (including the title/menu area) is image X = RAM X + 6, image Y = RAM Y + 45. For differently cropped or scaled images, override the mapping with `--offset-x`, `--offset-y`, `--scale-x`, and `--scale-y`.
+The default marker is a solid blue circle with a radius of 2 pixels. To draw single pixels instead, use:
+```
+python3 plot_global_landings.py 7 ~/minigolf-hole7-exhaustive/course7.png --radius 0
+```
+Other optional arguments include `--color '#xxxxxx'` (marker color), `--opacity 180` (transparency), `--output /PATH/TO/output.png` (output filename), and `--logs /PATH/TO/search-directory` (non-default log location).
+
+Example images (original / output):
+
+<img width="640" height="480" alt="install 2026-10-09 11 26 48" src="https://github.com/user-attachments/assets/ff884e06-b65e-4c41-8801-07002b3735b0" />
+
+<img width="640" height="480" alt="install 2026-10-09 11 26 48_landings" src="https://github.com/user-attachments/assets/b9d35fc0-32f7-4250-81ed-ae5ed728eb52" />
+
 
 ## Reranking a completed landing-state search
 

@@ -273,6 +273,7 @@ The script includes a possibility of searching a smaller window via
 cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 MINIGOLF_SCAN_X_MIN=X1 MINIGOLF_SCAN_X_MAX=X2 MINIGOLF_SCAN_Y_MIN=Y1 MINIGOLF_SCAN_Y_MAX=Y2 ./run_global_search.sh currentHoleNumber startingFrame initialX initialY frames_upperlimit
 ```
+Beware that the same is possible for the exhausting landing-search as described in the next section.
 
 # Running an exhaustive landing-state search
 

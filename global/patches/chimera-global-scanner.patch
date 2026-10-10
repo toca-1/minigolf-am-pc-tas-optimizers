@@ -11,7 +11,7 @@ index 221a87b..e9bcc69 100644
  /* chimera-run - the engine's headless runner.
   *
   * Loads a core package, a rom, and a movie input log; runs the movie; dumps
-@@ -744,6 +749,1224 @@ int main(int argc, char **argv)
+@@ -744,6 +749,1221 @@ int main(int argc, char **argv)
  		fprintf(stderr, "state file tag: %.*s\n", (int)(tagLen < sizeof tag ? tagLen : sizeof tag), (const char *)tag);
  	}
  
@@ -230,9 +230,8 @@ index 221a87b..e9bcc69 100644
 +		constexpr int64_t
 +			BALL_Y_ADDRESS = 0x023B9A06;
 +
-+		// One-byte gate-open flag in Physical RAM.
 +		constexpr int64_t
-+			GATE_OPEN_ADDRESS = 0x0043CD3F;
++			GATE_OPEN_ADDRESS = 0x006ACFB4;
 +
 +		const uint8_t START_HOLE =
 +			static_cast<uint8_t>(
@@ -744,7 +743,6 @@ index 221a87b..e9bcc69 100644
 +				readU32(BALL_PLAYABLE_ADDRESS) != 0;
 +			bool shotStarted = false;
 +
-+			// Reinitialize when restoring each candidate savestate.
 +			bool previousGateOpen =
 +				ram[GATE_OPEN_ADDRESS] != 0;
 +			bool gateOpened = false;
@@ -801,7 +799,6 @@ index 221a87b..e9bcc69 100644
 +						buf);
 +				}
 +
-+				// Observe transitions before testing for shot completion.
 +				if (captureLandings)
 +				{
 +					const bool currentGateOpen =

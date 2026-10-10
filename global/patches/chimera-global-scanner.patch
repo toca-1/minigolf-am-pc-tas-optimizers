@@ -11,17 +11,10 @@ index 221a87b..e9bcc69 100644
  /* chimera-run - the engine's headless runner.
   *
   * Loads a core package, a rom, and a movie input log; runs the movie; dumps
-@@ -744,6 +749,1284 @@ int main(int argc, char **argv)
+@@ -744,6 +749,1224 @@ int main(int argc, char **argv)
  		fprintf(stderr, "state file tag: %.*s\n", (int)(tagLen < sizeof tag ? tagLen : sizeof tag), (const char *)tag);
  	}
  
-+/*
-+	 * Pure planner / exhaustive-space precompute.
-+	 *
-+	 * No candidate emulation is performed here.  This enumerates every
-+	 * legal Display Input coordinate, generates the exact PS/2 input
-+	 * sequence, and deduplicates complete sequences.
-+	 */
 +	if (std::getenv("MINIGOLF_SCAN_PRECOMPUTE"))
 +	{
 +		try
@@ -38,34 +31,6 @@ index 221a87b..e9bcc69 100644
 +		}
 +	}
 +
-+
-+
-+
-+	/*
-+	 * Minigolf exhaustive scanner.
-+	 *
-+	 * MINIGOLF_SCAN=1 enables it.
-+	 *
-+	 * Optional:
-+	 *   MINIGOLF_SCAN_WORKER=N       0-based worker number
-+	 *   MINIGOLF_SCAN_WORKERS=N      total worker count
-+	 *   MINIGOLF_SCAN_MAX_FRAMES=N   initial ceiling (default 100)
-+	 *   MINIGOLF_SCAN_LIMIT=N        only evaluate N assigned plans
-+	 *                                (0/unset = no limit)
-+	 *   MINIGOLF_SCAN_PROGRESS=N     progress interval (default 1000)
-+	 *   MINIGOLF_SWITCH_DYNAMIC=1    normal -> dynamic_x86 on frame 0
-+	 *
-+	 * Plans are assigned by:
-+	 *
-+	 *   unique_plan_index % worker_count == worker
-+	 *
-+	 * Each worker keeps its own incumbent.  This is completely safe:
-+	 * a worker with a worse incumbent merely runs some candidates for
-+	 * longer; it cannot miss a candidate that beats the global optimum.
-+	 *
-+	 * We simulate THROUGH the incumbent frame, rather than stopping at
-+	 * incumbent-1, so ties at the eventual optimum are also retained.
-+	 */
 +	if (std::getenv("MINIGOLF_SCAN"))
 +	{
 +		if (stateIn.empty())
@@ -265,6 +230,10 @@ index 221a87b..e9bcc69 100644
 +		constexpr int64_t
 +			BALL_Y_ADDRESS = 0x023B9A06;
 +
++		// One-byte gate-open flag in Physical RAM.
++		constexpr int64_t
++			GATE_OPEN_ADDRESS = 0x0043CD3F;
++
 +		const uint8_t START_HOLE =
 +			static_cast<uint8_t>(
 +				scanStartHole);
@@ -273,9 +242,6 @@ index 221a87b..e9bcc69 100644
 +			static_cast<uint8_t>(
 +				scanNextHole);
 +
-+		/*
-+		 * Re-read the exact common branch state.
-+		 */
 +		std::vector<uint8_t> baseState;
 +
 +		if (!readWholeFile(
@@ -287,9 +253,6 @@ index 221a87b..e9bcc69 100644
 +				"scan: could not reread state");
 +		}
 +
-+		/*
-+		 * Locate Physical RAM.
-+		 */
 +		int32_t ramDomain = -1;
 +
 +		for (int32_t d = 0;
@@ -348,9 +311,6 @@ index 221a87b..e9bcc69 100644
 +				| (static_cast<uint32_t>(ram[address + 3]) << 24);
 +		};
 +
-+		/*
-+		 * Locate controls by name.
-+		 */
 +		auto findButton =
 +			[&](const char *wanted) -> int32_t
 +		{
@@ -501,11 +461,6 @@ index 221a87b..e9bcc69 100644
 +
 +		std::fflush(stderr);
 +
-+		/*
-+		 * This is the same exact full-screen enumeration used by
-+		 * MINIGOLF_SCAN_PRECOMPUTE.
-+		 */
-+
 +		minigolf_scan::configure_planner(
 +			static_cast<int>(
 +				scanCursorX),
@@ -624,10 +579,6 @@ index 221a87b..e9bcc69 100644
 +
 +		std::fflush(stderr);
 +
-+		/*
-+		 * bestScore == maxFrames + 1 means we have not found an
-+		 * HIO yet.
-+		 */
 +		int64_t bestScore =
 +			maxFrames + 1;
 +
@@ -759,10 +710,6 @@ index 221a87b..e9bcc69 100644
 +					buf);
 +			}
 +
-+			/*
-+			 * Include the current incumbent frame so that equal
-+			 * optimal results are not lost.
-+			 */
 +
 +			if (!captureLandings && sharedBest)
 +			{
@@ -793,31 +740,20 @@ index 221a87b..e9bcc69 100644
 +			int64_t readyAfter = -1;
 +			uint16_t landingX = 0;
 +			uint16_t landingY = 0;
-+
-+			/*
-+			 * "Ball can be played" has an early 0 -> 1 transition
-+			 * before the shot actually begins.  The meaningful
-+			 * sequence is:
-+			 *
-+			 *     0 -> 1   pre-shot; ignore
-+			 *     1 -> 0   shot has started
-+			 *     0 -> 1   shot has finished
-+			 *
-+			 * A hole-in-one changes course while the value remains
-+			 * 0, and is handled separately by the hole-byte check.
-+			 */
 +			bool previousPlayable =
 +				readU32(BALL_PLAYABLE_ADDRESS) != 0;
 +			bool shotStarted = false;
++
++			// Reinitialize when restoring each candidate savestate.
++			bool previousGateOpen =
++				ram[GATE_OPEN_ADDRESS] != 0;
++			bool gateOpened = false;
++			int64_t gateAfter = -1;
 +
 +			for (int64_t n = 0;
 +			     n < cutoff;
 +			     n++)
 +			{
-+				/*
-+				 * Always explicitly drive the private button.
-+				 * The hybrid core consumes it before guest input.
-+				 */
 +				ce_session_set_button(
 +					session,
 +					SEARCH_DYNAMIC_BUTTON,
@@ -865,6 +801,20 @@ index 221a87b..e9bcc69 100644
 +						buf);
 +				}
 +
++				// Observe transitions before testing for shot completion.
++				if (captureLandings)
++				{
++					const bool currentGateOpen =
++						ram[GATE_OPEN_ADDRESS] != 0;
++					if (!previousGateOpen && currentGateOpen
++					    && !gateOpened)
++					{
++						gateOpened = true;
++						gateAfter = n + 1;
++					}
++					previousGateOpen = currentGateOpen;
++				}
++
 +				const uint8_t hole =
 +					ram[HOLE_ADDRESS];
 +
@@ -882,20 +832,11 @@ index 221a87b..e9bcc69 100644
 +
 +					if (!shotStarted)
 +					{
-+						/*
-+						 * The first 0 -> 1 is only the pre-shot
-+						 * transition.  Arm landing detection only
-+						 * after the subsequent 1 -> 0 transition.
-+						 */
 +						if (previousPlayable && !playable)
 +							shotStarted = true;
 +					}
 +					else if (!previousPlayable && playable)
 +					{
-+						/*
-+						 * First 0 -> 1 after the shot actually
-+						 * started: the shot is over.
-+						 */
 +						readyAfter = n + 1;
 +						landingX = readU16(BALL_X_ADDRESS);
 +						landingY = readU16(BALL_Y_ADDRESS);
@@ -967,7 +908,9 @@ index 221a87b..e9bcc69 100644
 +					"input_frames=%zu "
 +					"status=%s "
 +					"after=%lld "
-+					"ball=%d,%d\n",
++					"ball=%d,%d "
++					"gate_opened=%d "
++					"gate_after=%lld\n",
 +					static_cast<long long>(worker),
 +					planIndex,
 +					u.canonicalX,
@@ -983,7 +926,9 @@ index 221a87b..e9bcc69 100644
 +					status,
 +					static_cast<long long>(eventAfter),
 +					landingOutX,
-+					landingOutY);
++					landingOutY,
++					gateOpened ? 1 : 0,
++					static_cast<long long>(gateAfter));
 +			}
 +
 +			if (score >= 0)
@@ -1222,10 +1167,6 @@ index 221a87b..e9bcc69 100644
 +			candidateRate,
 +			frameRate);
 +
-+		/*
-+		 * Machine-readable final results.  These, rather than the
-+		 * transient NEW_BEST lines, are what the merge step consumes.
-+		 */
 +		for (size_t planIndex :
 +		     bestPlanIndices)
 +		{
@@ -1292,7 +1233,6 @@ index 221a87b..e9bcc69 100644
 +
 +		return 0;
 +	}
-+
  	std::vector<uint8_t> state;
  	if (rerecord)
  	{
@@ -1301,7 +1241,7 @@ new file mode 100755
 index 0000000..6c344a8
 --- /dev/null
 +++ b/source/engine/tools/minigolf_scan_impl.h
-@@ -0,0 +1,732 @@
+@@ -0,0 +1,672 @@
 +#pragma once
 +
 +#include <array>
@@ -1315,15 +1255,6 @@ index 0000000..6c344a8
 +namespace minigolf_scan
 +{
 +
-+/*
-+ * Default planner configuration.
-+ *
-+ * The exhaustive scanner overrides the cursor and starting-carrier
-+ * values at runtime for the course being searched.
-+ *
-+ * Video:               640x480
-+ * Display Input plane: 2560x2048
-+ */
 +static constexpr int CURSOR_X = 672;
 +static constexpr int CURSOR_Y = 644;
 +
@@ -1352,12 +1283,6 @@ index 0000000..6c344a8
 +static constexpr int CLICK_NUDGE_X = 0;
 +static constexpr int CLICK_NUDGE_Y = 1;
 +
-+/*
-+ * Runtime planner state.
-+ *
-+ * The exhaustive scanner overrides these values before generating
-+ * candidate plans.
-+ */
 +static int ACTIVE_CURSOR_X = CURSOR_X;
 +static int ACTIVE_CURSOR_Y = CURSOR_Y;
 +static int ACTIVE_START_AXIS_X = START_AXIS_X;
@@ -1422,11 +1347,9 @@ index 0000000..6c344a8
 +{
 +	Plan plan;
 +
-+	/* First raw coordinate encountered: canonical representative. */
 +	int canonicalX = 0;
 +	int canonicalY = 0;
 +
-+	/* Raw-coordinate class bounds and size. */
 +	int minX = 0;
 +	int maxX = 0;
 +	int minY = 0;
@@ -1434,15 +1357,6 @@ index 0000000..6c344a8
 +	uint32_t aliases = 0;
 +};
 +
-+/*
-+ * Lua round_nearest():
-+ *
-+ *   v >= 0 -> floor(v + 0.5)
-+ *   v <  0 -> ceil (v - 0.5)
-+ *
-+ * Do it as integer rational arithmetic so no floating-point rounding
-+ * differences can creep into the exhaustive enumerator.
-+ */
 +static inline int round_ratio_half_away(int64_t numerator,
 +                                        int64_t denominator)
 +{
@@ -1511,11 +1425,6 @@ index 0000000..6c344a8
 +
 +	const int moved = dir * explicitAmount;
 +
-+	/*
-+	 * Explicit Mouse Speed takes precedence for guest motion,
-+	 * while the absolute carrier is moved to the opposite boundary
-+	 * to re-arm it for a later position-derived frame.
-+	 */
 +	const int rearmedPos =
 +		dir > 0 ? minv : maxv;
 +
@@ -1630,12 +1539,6 @@ index 0000000..6c344a8
 +	plan.finalAxisX = axisX;
 +	plan.finalAxisY = axisY;
 +
-+	/*
-+	 * Fastest possible click:
-+	 *
-+	 * If movement exists, press on its final frame.
-+	 * With no movement, press on candidate frame zero.
-+	 */
 +	const int pressFrame =
 +		path.empty()
 +			? 0
@@ -1683,9 +1586,6 @@ index 0000000..6c344a8
 +			"could not fit Y click nudge");
 +	}
 +
-+	/*
-+	 * Path frames.
-+	 */
 +	for (size_t i = 0; i < path.size(); i++)
 +	{
 +		const int f = static_cast<int>(i);
@@ -1715,12 +1615,6 @@ index 0000000..6c344a8
 +		});
 +	}
 +
-+	/*
-+	 * Stationary press/release portion.
-+	 *
-+	 * For a moving shot this contributes only the release frame.
-+	 * For a zero-displacement shot this writes both press and release.
-+	 */
 +	const int firstStationary =
 +		path.empty()
 +			? 0
@@ -1748,13 +1642,6 @@ index 0000000..6c344a8
 +		});
 +	}
 +
-+	/*
-+	 * Re-arm TAStudio's position carriers to neutral after release.
-+	 *
-+	 * First cleanup frame: one-mickey excursion.
-+	 * Second cleanup frame: the opposite position-derived mickey
-+	 * returns the guest cursor to the same final location.
-+	 */
 +	if (axisX != X_NEUTRAL ||
 +	    axisY != Y_NEUTRAL)
 +	{
@@ -1793,13 +1680,6 @@ index 0000000..6c344a8
 +	return plan;
 +}
 +
-+/*
-+ * Binary key for the COMPLETE generated input sequence.
-+ *
-+ * We deliberately dedupe the actual sequence delivered to DOSBox-X,
-+ * rather than merely assuming equal raw coordinates or equal dx/dy
-+ * are equivalent.
-+ */
 +static inline void append_i32(
 +	std::string &s,
 +	int32_t v)

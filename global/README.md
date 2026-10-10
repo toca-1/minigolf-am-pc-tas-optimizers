@@ -190,7 +190,7 @@ Configure the Waterbox guest build:
 
 ```
 ./waterbox/setup-guest.sh \
-  -m ~/src/chimera/chimera-common-minibox
+  -m ~/src/chimera-common-minibox
 ```
 
 Build:
@@ -205,7 +205,7 @@ Package the core:
 
 ```
 ./waterbox/build-package.sh \
-  -m ~/src/chimera/chimera-common-minibox \
+  -m ~/src/chimera-common-minibox \
   -r ~/src/chimera
 ```
 

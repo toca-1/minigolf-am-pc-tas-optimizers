@@ -137,6 +137,7 @@ meson compile \
 ## 2. Build the miniBox C++ guest toolchain
 
 ```
+cd ~/src
 git clone https://github.com/ToolAssisted-run/chimera-common-minibox.git
 cd chimera-common-minibox
 git checkout 427f6ed7972867638891d7ceb0e81ed9e9ab7db4
@@ -172,6 +173,7 @@ ninja \
 ## 3. Build the hybrid DOSBox-X core
 
 ```
+cd ~/src
 git clone https://github.com/ToolAssisted-run/chimera-core-dosbox-x.git
 cd chimera-core-dosbox-x
 git checkout 42c7f7fd0df71f7727f5139be06a3fe948660578

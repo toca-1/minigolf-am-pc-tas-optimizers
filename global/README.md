@@ -280,7 +280,7 @@ cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 ./run_global_landing_search.sh currentHoleNumber startingFrame initialX initialY frames_upperlimit targetX targetY
 ```
 
-`currentHoleNumber`, `startingFrame`, `initialX`, and `initialY` have the same meaning as for the hole-in-one search. `targetX` and `targetY` are coordinates in the same coordinate system as the ball-position values read from Physical RAM (may be the hole itself or an intermediate point chosen because of the course geometry). These values are used only to rank the recorded landing states and do not affect which input plans are searched. `frames_upperlimit` is the maximum number of frames simulated for each candidate. A candidate whose shot-ending signal has not occurred within that limit is recorded as a timeout and is not included in the ranked landing states.
+`currentHoleNumber`, `startingFrame`, `initialX`, and `initialY` have the same meaning as for the hole-in-one search. `targetX` and `targetY` are coordinates in the same coordinate system as the ball-position values read from Physical RAM (may be the hole itself or an intermediate point chosen because of the course geometry). These values are used only to rank the recorded landing states and do not affect which input plans are searched. `frames_upperlimit` is the maximum number of frames simulated for each candidate. A candidate whose shot-ending signal has not occurred within that limit is recorded as a timeout and is not included in the ranked landing states. The landing-state scanner also monitors the gate flag at Physical RAM address `0x006ACFB4`. For every candidate, it records whether this byte changes from 0 to 1 during the simulated shot and, if so, the first frame on which that transition is observed. Each `LANDING_RESULT` entry includes `gate_opened=1` or `gate_opened=0` and `gate_after=N` (or `gate_after=-1` if no opening was observed).
 
 To monitor the landing-state search, use:
 ```
@@ -299,14 +299,12 @@ cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 python3 monitor_global_landing_search.py 17 250 530 200
 ```
 
-The `ended` value shown by the monitor is the frame offset at which the game's shot-state flag returns from 0 to 1 and the final ball position is recorded. A subsequent shot can in practice be entered a few frames before this signal, so `ended` is useful for comparing first shots but is not necessarily the earliest possible frame on which the next shot can be entered.
-
 ## Visualizing landing positions on a course screenshot
 
 `plot_global_landings.py` overlays the final ball positions from an exhaustive landing-state search onto a screenshot of the course (taken by default with F12 while in the emulator). Each distinct landing position is marked with a colored circle. The syntax is:
 ```
 cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
-python3 plot_global_landings.py currentHoleNumber /PATH/TP/course-screenshot.png
+python3 plot_global_landings.py currentHoleNumber /PATH/TO/course-screenshot.png
 ```
 e.g., for hole 7, with the screenshot saved in the search output directory as `course7.png`:
 ```
@@ -325,7 +323,6 @@ Example images (original / output):
 
 <img width="640" height="480" alt="install 2026-10-09 11 26 48_landings" src="https://github.com/user-attachments/assets/b9d35fc0-32f7-4250-81ed-ae5ed728eb52" />
 
-
 ## Reranking a completed landing-state search
 
 Every completed landing position remains stored as a log. A finished search can therefore be ranked against a different target point without running the emulator search again:
@@ -338,7 +335,16 @@ e.g.,
 python3 rank_global_results.py 17 530 200 --top 10
 ```
 
-The ranker can also show the distance/time Pareto frontier (useful for finding candidates which land somewhat farther from the target but finish their first shot earlier):
+By default, the ranker sorts completed shots by their distance from the target. With the updated scanner logs, results can additionally be filtered by whether the shot opened the gate (`--gate opened`) or did not open it (`--gate not-opened`). For example, to show the 20 earliest-ending shots that opened the gate:
+```
+python3 rank_global_results.py 17 530 200 --gate opened --sort time --top 20
+```
+To compare against shots that did not open the gate:
+```
+python3 rank_global_results.py 17 530 200 --gate not-opened --sort time --top 20
+```
+
+`--sort distance` (the default) sorts by target distance; `--sort time` sorts by the frame at which the first shot ended. The ranker also displays the first gate-opening frame in its `opened after` column. `--gate all` includes every completed shot (the default). The ranker can also show the distance/time Pareto frontier (useful for finding candidates which land somewhat farther from the target but finish their first shot earlier):
 ```
 python3 rank_global_results.py 17 530 200 --pareto --top 30
 ```

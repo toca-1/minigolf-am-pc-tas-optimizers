@@ -302,6 +302,7 @@ cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 python3 monitor_global_landing_search.py 17 250 530 200
 ```
 
+
 ## Visualizing landing positions on a course screenshot
 
 `plot_global_landings.py` overlays the final ball positions from an exhaustive landing-state search onto a screenshot of the course (taken by default with F12 while in the emulator). Each distinct landing position is marked with a colored circle. The syntax is:
@@ -313,12 +314,18 @@ e.g., for hole 7, with the screenshot saved in the search output directory as `c
 ```
 python3 plot_global_landings.py 7 ~/minigolf-hole7-exhaustive/course7.png
 ```
-By default, the script reads all `worker-*.log` files in `~/minigolf-hole*-exhaustive/` and saves the annotated image alongside the screenshot as `ORIGINAL-FILENAME_landings.png`. The first run also extracts the landing coordinates and their occurrence counts into `landing-positions.tsv`, with `landing-positions.meta.json` alongside it, in the search output directory. Later runs reuse this cache instead of rereading the worker logs, unless the logs have changed. To use the cached data even if the logs have changed, add `--cache-only`; to force a fresh extraction, add `--refresh-cache`. The default mapping from RAM coordinates to an uncropped 640×480 game screenshot (including the title/menu area) is image X = RAM X + 6, image Y = RAM Y + 45. For differently cropped or scaled images, override the mapping with `--offset-x`, `--offset-y`, `--scale-x`, and `--scale-y`.
+By default, the script reads all `worker-*.log` files in `~/minigolf-hole*-exhaustive/` and saves the annotated image alongside the screenshot as `ORIGINAL-FILENAME_landings.png`. The first run also extracts the landing coordinates and their occurrence counts (separated by gate status) into `landing-positions.tsv`, with `landing-positions.meta.json` alongside it, in the search output directory. Later runs reuse this cache instead of rereading the worker logs, unless the logs have changed. To use the cached data even if the logs have changed, add `--cache-only`; to force a fresh extraction, add `--refresh-cache`. The default mapping from RAM coordinates to an uncropped 640×480 game screenshot (including the title/menu area) is image X = RAM X + 6, image Y = RAM Y + 45. For differently cropped or scaled images, override the mapping with `--offset-x`, `--offset-y`, `--scale-x`, and `--scale-y`.
+
 The default marker is a solid blue circle with a radius of 2 pixels. To draw single pixels instead, use:
 ```
 python3 plot_global_landings.py 7 ~/minigolf-hole7-exhaustive/course7.png --radius 0
 ```
-Other optional arguments include `--color '#xxxxxx'` (marker color), `--opacity 180` (transparency), `--output /PATH/TO/output.png` (output filename), and `--logs /PATH/TO/search-directory` (non-default log location).
+To plot only shots that opened the gate, add `--gate opened`:
+```
+python3 plot_global_landings.py 7 ~/minigolf-hole7-exhaustive/course7.png --gate opened --radius 0
+```
+- Other available filters are `--gate not-opened` (shots that did not open the gate), `--gate unknown` (older logs without gate information), and `--gate all` (default, no filtering). Filtered images are saved as `ORIGINAL-FILENAME_landings_gate-FILTER.png`, so they do not overwrite the unfiltered output.
+- Other optional arguments include `--color '#xxxxxx'` (marker color), `--opacity 180` (transparency), `--output /PATH/TO/output.png` (output filename), and `--logs /PATH/TO/search-directory` (non-default log location).
 
 Example images (original / output):
 

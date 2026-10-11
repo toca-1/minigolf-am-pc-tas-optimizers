@@ -25,9 +25,10 @@ except ImportError:
 BALL_PATTERN = re.compile(r"(?:^|\s)ball=(-?\d+),(-?\d+)(?:\s|$)")
 STATUS_PATTERN = re.compile(r"(?:^|\s)status=([a-z_]+)(?:\s|$)")
 GATE_PATTERN = re.compile(r"(?:^|\s)gate_opened=([01])(?:\s|$)")
+AFTER_PATTERN = re.compile(r"(?:^|\s)after=(-?\d+)(?:\s|$)")
 COLOR_PATTERN = re.compile(r"#?([0-9a-fA-F]{6})\Z")
 VIDEO_SIZE = (640, 480)
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 DEFAULT_OFFSET_X = 6
 DEFAULT_OFFSET_Y = 45
 
@@ -59,8 +60,8 @@ def log_snapshot(log_dir: Path) -> tuple[list[Path], list[dict]]:
     return paths, sources
 
 
-def collect_landings(paths: list[Path]) -> tuple[Counter[tuple[int, int, str]], Counter[str]]:
-    counts: Counter[tuple[int, int, str]] = Counter()
+def collect_landings(paths: list[Path]) -> tuple[Counter[tuple[int, int, str, int]], Counter[str]]:
+    counts: Counter[tuple[int, int, str, int]] = Counter()
     statuses: Counter[str] = Counter()
 
     for path in paths:
@@ -90,7 +91,9 @@ def collect_landings(paths: list[Path]) -> tuple[Counter[tuple[int, int, str]], 
                         continue
                     gate_match = GATE_PATTERN.search(line)
                     gate = ("opened" if gate_match.group(1) == "1" else "not-opened") if gate_match else "unknown"
-                    counts[(x, y, gate)] += 1
+                    after_match = AFTER_PATTERN.search(line)
+                    after = int(after_match.group(1)) if after_match else -1
+                    counts[(x, y, gate, after if after >= 0 else -1)] += 1
 
     return counts, statuses
 
@@ -109,7 +112,7 @@ def file_sha256(path: Path) -> str:
 
 def write_cache(
     cache_path: Path,
-    counts: Counter[tuple[int, int, str]],
+    counts: Counter[tuple[int, int, str, int]],
     statuses: Counter[str],
     sources: list[dict],
 ) -> None:
@@ -124,16 +127,16 @@ def write_cache(
         ) as handle:
             temporary = Path(handle.name)
             writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
-            writer.writerow(("x", "y", "gate", "count"))
-            for (x, y, gate), count in sorted(counts.items()):
-                writer.writerow((x, y, gate, count))
+            writer.writerow(("x", "y", "gate", "after", "count"))
+            for (x, y, gate, after), count in sorted(counts.items()):
+                writer.writerow((x, y, gate, after, count))
 
         metadata = {
             "cache_version": CACHE_VERSION,
             "sources": sources,
             "statuses": dict(statuses),
             "landing_records": sum(counts.values()),
-            "distinct_positions": len({(x, y) for x, y, gate in counts}),
+            "distinct_positions": len({(x, y) for x, y, gate, after in counts}),
             "tsv_sha256": file_sha256(temporary),
         }
         with tempfile.NamedTemporaryFile(
@@ -156,7 +159,7 @@ def write_cache(
 
 def read_cache(
     cache_path: Path, expected_sources: list[dict] | None,
-) -> tuple[Counter[tuple[int, int, str]], Counter[str], int] | None:
+) -> tuple[Counter[tuple[int, int, str, int]], Counter[str], int] | None:
     meta_path = cache_meta_path(cache_path)
     try:
         with meta_path.open("r", encoding="utf-8") as handle:
@@ -167,18 +170,19 @@ def read_cache(
             return None
         if metadata.get("tsv_sha256") != file_sha256(cache_path):
             return None
-        positions: Counter[tuple[int, int, str]] = Counter()
+        positions: Counter[tuple[int, int, str, int]] = Counter()
         with cache_path.open("r", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle, delimiter="\t")
-            if reader.fieldnames != ["x", "y", "gate", "count"]:
+            if reader.fieldnames != ["x", "y", "gate", "after", "count"]:
                 return None
             for row in reader:
                 x, y, count = int(row["x"]), int(row["y"]), int(row["count"])
                 gate = row["gate"]
-                if x < 0 or y < 0 or count <= 0 or gate not in ("opened", "not-opened", "unknown") or (x, y, gate) in positions:
+                after = int(row["after"])
+                if x < 0 or y < 0 or count <= 0 or after < -1 or gate not in ("opened", "not-opened", "unknown") or (x, y, gate, after) in positions:
                     return None
-                positions[(x, y, gate)] = count
-        if len({(x, y) for x, y, gate in positions}) != metadata.get("distinct_positions"):
+                positions[(x, y, gate, after)] = count
+        if len({(x, y) for x, y, gate, after in positions}) != metadata.get("distinct_positions"):
             return None
         if sum(positions.values()) != metadata.get("landing_records"):
             return None
@@ -190,7 +194,7 @@ def read_cache(
 
 def positions_from_cache_or_logs(
     log_dir: Path, cache_path: Path, refresh: bool, cache_only: bool,
-) -> tuple[Counter[tuple[int, int, str]], Counter[str], int, str]:
+) -> tuple[Counter[tuple[int, int, str, int]], Counter[str], int, str]:
     if cache_only:
         cached = read_cache(cache_path, expected_sources=None)
         if cached is None:
@@ -240,9 +244,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--output", type=Path,
-        help="output PNG (default: <image_stem>_landings.png, or _landings_gate-<filter>.png when filtered)"
+        help="output PNG (default: <image_stem>_landings[filters].png)"
     )
     parser.add_argument("--gate", choices=("all", "opened", "not-opened", "unknown"), default="all", help="filter landing positions by gate state (default: all)")
+    parser.add_argument("--maxtime", type=int, help="include only shots ending within this many frames")
     parser.add_argument("--radius", type=int, default=2, help="filled circle radius in output pixels (0 = one pixel; default: 2)")
     parser.add_argument("--color", type=hex_color, default=(0, 0, 255), help="marker RGB hex color (default: #0000ff)")
     parser.add_argument("--opacity", type=int, default=255, help="marker opacity 1..255 (default: 255 = solid)")
@@ -264,6 +269,8 @@ def main() -> int:
 
     if not 1 <= args.currentHoleNumber <= 18:
         parser.error("currentHoleNumber must be 1..18")
+    if args.maxtime is not None and args.maxtime < 0:
+        parser.error("--maxtime must be >= 0")
     if args.radius < 0:
         parser.error("--radius must be >= 0")
     if not 1 <= args.opacity <= 255:
@@ -275,6 +282,8 @@ def main() -> int:
     log_dir = (args.logs or (out_root / f"minigolf-hole{args.currentHoleNumber}-exhaustive")).expanduser()
     cache = (args.cache or (log_dir / "landing-positions.tsv")).expanduser()
     suffix = "_landings" if args.gate == "all" else f"_landings_gate-{args.gate}"
+    if args.maxtime is not None:
+        suffix += f"_maxtime-{args.maxtime}"
     output = (args.output or args.image.with_name(f"{args.image.stem}{suffix}.png")).expanduser()
     if output.suffix.lower() != ".png":
         parser.error("--output must end in .png (to preserve exact pixel markers)")
@@ -286,11 +295,11 @@ def main() -> int:
             log_dir, cache, args.refresh_cache, args.cache_only
         )
         positions: Counter[tuple[int, int]] = Counter()
-        for (x, y, gate), count in all_positions.items():
-            if args.gate == "all" or gate == args.gate:
+        for (x, y, gate, after), count in all_positions.items():
+            if (args.gate == "all" or gate == args.gate) and (args.maxtime is None or 0 <= after <= args.maxtime):
                 positions[(x, y)] += count
         if not positions:
-            raise ValueError(f"no valid 'status=ended' landing positions match --gate {args.gate} in {log_dir}")
+            raise ValueError(f"no valid 'status=ended' landing positions match the selected filters in {log_dir}")
         with Image.open(args.image) as source:
             base = source.convert("RGBA")
     except (OSError, ValueError) as exc:
@@ -349,6 +358,7 @@ def main() -> int:
     print(f"Cache               : {cache} ({cache_action})")
     print(f"Worker logs recorded: {num_logs}")
     print(f"Gate filter         : {args.gate}")
+    print(f"Max time            : {args.maxtime if args.maxtime is not None else 'none'}")
     print(f"Landing records     : {sum(positions.values())} (status=ended, valid coordinates)")
     print(f"Distinct RAM points : {len(positions)}")
     print(f"Markers drawn       : {len(pixel_positions)}")

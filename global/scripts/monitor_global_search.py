@@ -15,6 +15,7 @@ DEFAULT_TOTAL = 261_016
 TOKEN = b"[minigolf] CPU core -> dynamic_x86"
 INTERVAL = 10.0
 RATE_WINDOW = 60.0
+ETA_WINDOW = 180.0
 
 
 def bounded_int(name: str, minimum: int, maximum: int):
@@ -69,6 +70,10 @@ shared_by_score: dict[int, str] = {}
 completed: dict[int, str] = {}
 
 states: dict[Path, dict[str, object]] = {}
+worker_counts: dict[int, int] = {}
+worker_assigned: dict[int, int] = {}
+worker_samples: dict[int, deque[tuple[float, int]]] = {}
+worker_count_hint = 0
 
 samples: deque[tuple[float, int]] = deque()
 samples.append((time.monotonic(), 0))
@@ -89,12 +94,25 @@ def parse_worker(line: str) -> int:
 	return int(m.group(1)) if m else -1
 
 
-def consume_logical_line(line: str) -> None:
-	global total
+def consume_logical_line(line: str, worker_id: int | None) -> None:
+	global total, worker_count_hint
 
 	m = re.match(r"unique plans\s*:\s*(\d+)", line)
 	if m:
 		total = int(m.group(1))
+
+	m = re.match(r"worker\s*:\s*\d+\s*/\s*(\d+)", line)
+	if m:
+		worker_count_hint = max(worker_count_hint, int(m.group(1)))
+
+	if worker_id is not None:
+		m = re.match(r"assigned to worker\s*:\s*(\d+)", line)
+		if m:
+			worker_assigned[worker_id] = int(m.group(1))
+		elif line.startswith("PROGRESS "):
+			m = re.search(r"\bdone=\d+/(\d+)\b", line)
+			if m:
+				worker_assigned[worker_id] = int(m.group(1))
 
 	if line.startswith(("SHARED_BEST ", "NEW_BEST ", "TIE_BEST ")):
 		improvement_events.append(line)
@@ -110,28 +128,31 @@ def consume_logical_line(line: str) -> None:
 			completed[worker] = line
 
 
-def consume_physical_line(raw: bytes) -> None:
+def consume_physical_line(raw: bytes, worker_id: int | None) -> None:
 	text = raw.decode("utf-8", errors="replace")
 	text = text.replace("\\n", "\n")
 
 	for line in text.splitlines():
-		consume_logical_line(line)
+		consume_logical_line(line, worker_id)
 
 
 def scan_full_log(path: Path) -> None:
 	global candidate_count
 
+	worker_id = int(path.stem.split("-")[-1])
 	try:
 		data = path.read_bytes()
 	except OSError:
 		data = b""
 
-	candidate_count += data.count(TOKEN)
+	starts = data.count(TOKEN)
+	candidate_count += starts
+	worker_counts[worker_id] = starts
 
 	pieces = data.split(b"\n")
 
 	for raw in pieces[:-1]:
-		consume_physical_line(raw)
+		consume_physical_line(raw, worker_id)
 
 	states[path] = {
 		"offset": len(data),
@@ -143,6 +164,7 @@ def scan_full_log(path: Path) -> None:
 def rescan_all_logs() -> None:
 	global total, candidate_count
 	global improvement_events, shared_by_score, completed, states, samples
+	global worker_counts, worker_assigned, worker_samples, worker_count_hint
 
 	total = DEFAULT_TOTAL
 	candidate_count = 0
@@ -150,6 +172,10 @@ def rescan_all_logs() -> None:
 	shared_by_score = {}
 	completed = {}
 	states = {}
+	worker_counts = {}
+	worker_assigned = {}
+	worker_samples = {}
+	worker_count_hint = 0
 
 	for path in sorted(root.glob("worker-*.log")):
 		scan_full_log(path)
@@ -199,7 +225,10 @@ def read_new_data() -> None:
 		assert isinstance(old_tail, bytes)
 
 		combined_token_data = old_tail + new
-		candidate_count += combined_token_data.count(TOKEN)
+		starts = combined_token_data.count(TOKEN)
+		candidate_count += starts
+		worker_id = int(path.stem.split("-")[-1])
+		worker_counts[worker_id] = worker_counts.get(worker_id, 0) + starts
 
 		state["token_tail"] = combined_token_data[
 			-(len(TOKEN) - 1):
@@ -212,7 +241,7 @@ def read_new_data() -> None:
 		pieces = physical.split(b"\n")
 
 		for raw in pieces[:-1]:
-			consume_physical_line(raw)
+			consume_physical_line(raw, worker_id)
 
 		state["physical_carry"] = pieces[-1]
 
@@ -283,6 +312,51 @@ def finished_info() -> dict | None:
 		return None
 
 
+
+def worker_eta(now: float, workers: int) -> str:
+	if workers <= 0:
+		return "calculating..."
+
+	estimates: list[float] = []
+	for worker in range(workers):
+		if worker in completed:
+			continue
+		if worker not in worker_counts:
+			return "calculating..."
+
+		assigned = worker_assigned.get(worker)
+		if assigned is None:
+			assigned = (total - 1 - worker) // workers + 1 if worker < total else 0
+		if assigned == 0:
+			continue
+
+		remaining = max(1, assigned - worker_counts[worker])
+		history = worker_samples.get(worker)
+		if not history or len(history) < 2:
+			return "calculating..."
+
+		t0, c0 = history[0]
+		elapsed = now - t0
+		started = worker_counts[worker] - c0
+		if elapsed <= 0 or started <= 0:
+			return "calculating..."
+
+		estimates.append(remaining * elapsed / started)
+
+	seconds = int(max(estimates, default=0.0))
+	hours, rem = divmod(seconds, 3600)
+	minutes, secs = divmod(rem, 60)
+	return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def update_worker_samples(now: float) -> None:
+	for worker, count in worker_counts.items():
+		history = worker_samples.setdefault(worker, deque())
+		history.append((now, count))
+		while len(history) > 2 and now - history[0][0] > ETA_WINDOW:
+			history.popleft()
+
+
 def clear_screen() -> None:
 	os.system("clear")
 
@@ -311,16 +385,6 @@ def render() -> bool:
 	)
 	pct = max(0.0, min(100.0, pct))
 
-	remaining = max(0, total - candidate_count)
-
-	if rate > 0:
-		eta_seconds = int(remaining / rate)
-		hours, rem = divmod(eta_seconds, 3600)
-		minutes, seconds = divmod(rem, 60)
-		eta = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-	else:
-		eta = "calculating..."
-
 	width = 75
 	filled = min(
 		width,
@@ -345,6 +409,8 @@ def render() -> bool:
 		if config and config_matches(config)
 		else 0
 	)
+	update_worker_samples(now)
+	eta = worker_eta(now, expected_workers or worker_count_hint)
 
 	detected_workers = len(states)
 

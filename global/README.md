@@ -335,7 +335,7 @@ Example images (original / output):
 
 ## Reranking a completed landing-state search
 
-Every completed landing position remains stored as a log. A finished search can therefore be ranked against a different target point without running the emulator search again:
+A finished search can be ranked against a different target point without running the search again:
 ```
 cd ~/src/minigolf-am-pc-tas-optimizers/global/scripts
 python3 rank_global_results.py currentHoleNumber targetX targetY --top 10
@@ -344,8 +344,9 @@ e.g.,
 ```
 python3 rank_global_results.py 17 530 200 --top 10
 ```
+By default, the ranker sorts completed shots by their distance from the target (`--sort distance`); `--sort time` sorts by the frame at which the first shot ended. Additionally, `--maxdistance D` only shows shots that are at most `D` units of distance away from the target position.
 
-By default, the ranker sorts completed shots by their distance from the target. With the updated scanner logs, results can additionally be filtered by whether the shot opened the gate (`--gate opened`) or did not open it (`--gate not-opened`). For example, to show the 20 earliest-ending shots that opened the gate:
+If a gate is present in the course, results can additionally be filtered by whether the shot opened the gate (`--gate opened`) or did not open it (`--gate not-opened`). For example, to show the 20 earliest-ending shots that opened the gate:
 ```
 python3 rank_global_results.py 17 530 200 --gate opened --sort time --top 20
 ```
@@ -354,7 +355,7 @@ To compare against shots that did not open the gate:
 python3 rank_global_results.py 17 530 200 --gate not-opened --sort time --top 20
 ```
 
-`--sort distance` (the default) sorts by target distance; `--sort time` sorts by the frame at which the first shot ended. The ranker also displays the first gate-opening frame in its `opened after` column. `--gate all` includes every completed shot (the default). The ranker can also show the distance/time Pareto frontier (useful for finding candidates which land somewhat farther from the target but finish their first shot earlier):
+The ranker also displays the first gate-opening frame in its `opened after` column. `--gate all` includes every completed shot (the default). The ranker can also show the distance/time Pareto frontier (useful for finding candidates which land somewhat farther from the target but finish their first shot earlier):
 ```
 python3 rank_global_results.py 17 530 200 --pareto --top 30
 ```

@@ -241,7 +241,7 @@ chmod +x \
   run_global_landing_search.sh
 ```
 
-Once everything is done, the file structure should look like this:
+Once everything is done, the folder structure should look like this:
 
 <img width="507" height="212" alt="image" src="https://github.com/user-attachments/assets/2af84bdc-c926-47b8-bd86-37f34a88d387" />
 

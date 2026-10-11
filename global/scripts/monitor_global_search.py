@@ -15,7 +15,7 @@ DEFAULT_TOTAL = 261_016
 TOKEN = b"[minigolf] CPU core -> dynamic_x86"
 INTERVAL = 10.0
 RATE_WINDOW = 60.0
-ETA_WINDOW = 180.0
+ETA_WINDOW = 600.0
 
 
 def bounded_int(name: str, minimum: int, maximum: int):

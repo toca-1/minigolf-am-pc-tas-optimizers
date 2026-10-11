@@ -44,6 +44,7 @@ def iter_logical_lines(path: Path) -> Iterator[str]:
 
 
 def parse_gate(fields: dict[str, str]) -> tuple[int | None, int | None]:
+    """Old logs lacking gate data remain unknown, never 'not opened'."""
     value = fields.get("gate_opened")
     if value not in ("0", "1"):
         return None, None
@@ -68,7 +69,6 @@ def collect(root: Path, target_x: int, target_y: int) -> tuple[list[dict], dict[
             f = parse_fields(line)
             status = f.get("status", "")
 
-            # Compatibility with older test logs.
             if status == "ready":
                 status = "ended"
 
@@ -110,8 +110,6 @@ def collect(root: Path, target_x: int, target_y: int) -> tuple[list[dict], dict[
 
 
 def pareto_frontier(rows: list[dict]) -> list[dict]:
-    # Non-dominated in (distance^2, ready_after).  Sort by distance first;
-    # a row survives only if it improves the best ready time seen so far.
     result: list[dict] = []
     best_ready: int | None = None
     for row in sorted(rows, key=lambda r: (r["dist2"], r["ready_after"], r["plan"])):
@@ -183,6 +181,10 @@ def main() -> int:
     parser.add_argument("targetX", type=bounded_int("targetX", 0, 65535))
     parser.add_argument("targetY", type=bounded_int("targetY", 0, 65535))
     parser.add_argument("--top", type=int, default=10)
+    parser.add_argument(
+        "--maxdistance", type=float, metavar="X",
+        help="only include shots landing at most X RAM coordinate units from the target",
+    )
     parser.add_argument("--pareto", action="store_true", help="rank only non-dominated distance/time candidates")
     parser.add_argument(
         "--gate", choices=("all", "opened", "not-opened", "unknown"), default="all",
@@ -196,6 +198,10 @@ def main() -> int:
     args = parser.parse_args()
     if args.top <= 0:
         parser.error("--top must be > 0")
+    if args.maxdistance is not None and (
+        not math.isfinite(args.maxdistance) or args.maxdistance < 0
+    ):
+        parser.error("--maxdistance must be finite and >= 0")
 
     out_root = Path(os.environ.get("MINIGOLF_OUT_ROOT", str(Path.home()))).expanduser()
     root = out_root / f"minigolf-hole{args.currentHoleNumber}-exhaustive"
@@ -217,6 +223,9 @@ def main() -> int:
         rows = [r for r in rows if r["gate_opened"] == 0]
     elif args.gate == "unknown":
         rows = [r for r in rows if r["gate_opened"] is None]
+    if args.maxdistance is not None:
+        max_dist2 = args.maxdistance * args.maxdistance
+        rows = [r for r in rows if r["dist2"] <= max_dist2]
     selected = pareto_frontier(rows) if args.pareto else rows
     if args.sort == "time":
         selected.sort(key=lambda r: (r["ready_after"], r["dist2"], r["plan"]))
@@ -232,7 +241,11 @@ def main() -> int:
         f"not-opened={counts['gate_not_opened']} "
         f"unknown={counts['gate_unknown']}"
     )
-    print(f"Selected ended shots (--gate {args.gate}): {len(rows)}")
+    distance_filter = (
+        f", --maxdistance {args.maxdistance:g}"
+        if args.maxdistance is not None else ""
+    )
+    print(f"Selected ended shots (--gate {args.gate}{distance_filter}): {len(rows)}")
     if args.pareto:
         print(f"Pareto frontier: {len(selected)} candidates")
     print()
